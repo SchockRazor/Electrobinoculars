@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="imperial_amber">#FFA500</color>
+    <color name="imperial_amber_bright">#FFD54F</color>
+    <color name="imperial_amber_dark">#C67D00</color>
+    <color name="background_black">#050505</color>
+    <color name="surface_dark">#080C10</color>
+</resources>
