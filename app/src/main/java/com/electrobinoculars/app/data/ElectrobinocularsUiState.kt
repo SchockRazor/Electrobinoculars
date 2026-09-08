@@ -12,6 +12,8 @@ package com.electrobinoculars.app.data
  * @property hasCameraPermission True if runtime camera permission has been granted by user.
  * @property isCameraHardwareAvailable True if physical back camera hardware exists on the device.
  * @property isUsingFallbackTestPattern True if the synthetic animated calibration grid is active.
+ * @property isUiVisible True if tactical HUD and controls should be displayed, false for minimal debug mode (defaults to false at launch).
+ * @property isDebugPanelVisible True if debug buttons are displayed.
  */
 data class ElectrobinocularsUiState(
     val visionMode: VisionMode = VisionMode.STANDARD,
@@ -19,5 +21,7 @@ data class ElectrobinocularsUiState(
     val telemetry: SensorTelemetry = SensorTelemetry(),
     val hasCameraPermission: Boolean = false,
     val isCameraHardwareAvailable: Boolean = true,
-    val isUsingFallbackTestPattern: Boolean = false
+    val isUsingFallbackTestPattern: Boolean = false,
+    val isUiVisible: Boolean = false,
+    val isDebugPanelVisible: Boolean = true
 )

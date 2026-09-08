@@ -41,6 +41,13 @@ class SensorTelemetryManager(
     private var currentZoomRatio: Float = 1.0f
     private var isListening = false
 
+    private var lastAzimuthDeg: Float = 0.0f
+    private var lastPitchDeg: Float = -5.0f // default slight tilt to produce realistic initial distance
+    private var lastRollDeg: Float = 0.0f
+
+    private var simulatedAzimuth: Float? = null
+    private var simulatedPitch: Float? = null
+
     init {
         rotationVectorSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
         accelerometerSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
@@ -52,6 +59,48 @@ class SensorTelemetryManager(
      */
     fun updateZoomRatio(zoomRatio: Float) {
         currentZoomRatio = if (zoomRatio.isNaN() || zoomRatio < 1.0f) 1.0f else zoomRatio
+        emitCurrentState()
+    }
+
+    /**
+     * Sets a manual simulated heading in degrees [0, 359].
+     */
+    fun setSimulatedHeading(headingDeg: Float) {
+        simulatedAzimuth = ((headingDeg % 360f) + 360f) % 360f
+        emitCurrentState()
+    }
+
+    /**
+     * Adjusts the simulated heading by a delta angle in degrees.
+     */
+    fun adjustSimulatedHeading(deltaDeg: Float) {
+        val current = simulatedAzimuth ?: lastAzimuthDeg
+        setSimulatedHeading(current + deltaDeg)
+    }
+
+    /**
+     * Sets a manual simulated pitch in degrees [-85, 85].
+     */
+    fun setSimulatedPitch(pitchDeg: Float) {
+        simulatedPitch = pitchDeg.coerceIn(-85f, 85f)
+        emitCurrentState()
+    }
+
+    /**
+     * Adjusts the simulated pitch by a delta angle in degrees.
+     */
+    fun adjustSimulatedPitch(deltaDeg: Float) {
+        val current = simulatedPitch ?: lastPitchDeg
+        setSimulatedPitch(current + deltaDeg)
+    }
+
+    /**
+     * Resets simulated overrides back to hardware sensor readings.
+     */
+    fun resetSimulation() {
+        simulatedAzimuth = null
+        simulatedPitch = null
+        emitCurrentState()
     }
 
     /**
@@ -89,6 +138,7 @@ class SensorTelemetryManager(
         }
 
         isListening = true
+        emitCurrentState()
     }
 
     /**
@@ -187,27 +237,38 @@ class SensorTelemetryManager(
             azimuthDeg += 360f
         }
 
-        // Pitch (radians -> degrees)
         var pitchDeg = Math.toDegrees(orientationAngles[1].toDouble()).toFloat()
         if (pitchDeg.isNaN() || pitchDeg.isInfinite()) {
             pitchDeg = 0.0f
         }
 
-        // Roll (radians -> degrees)
         var rollDeg = Math.toDegrees(orientationAngles[2].toDouble()).toFloat()
         if (rollDeg.isNaN() || rollDeg.isInfinite()) {
             rollDeg = 0.0f
         }
 
-        val cardinal = RangefinderEngine.getCardinalDirection(azimuthDeg)
-        val estimatedRange = RangefinderEngine.calculateEstimatedRangeMeters(pitchDeg, currentZoomRatio)
+        lastAzimuthDeg = azimuthDeg
+        lastPitchDeg = pitchDeg
+        lastRollDeg = rollDeg
+
+        emitCurrentState()
+    }
+
+    /**
+     * Emits current state accounting for active simulation overrides or hardware values.
+     */
+    fun emitCurrentState() {
+        val effectiveAzimuth = simulatedAzimuth ?: lastAzimuthDeg
+        val effectivePitch = simulatedPitch ?: lastPitchDeg
+        val cardinal = RangefinderEngine.getCardinalDirection(effectiveAzimuth)
+        val estimatedRange = RangefinderEngine.calculateEstimatedRangeMeters(effectivePitch, currentZoomRatio)
 
         onTelemetryUpdated(
             SensorTelemetry(
-                headingDegrees = azimuthDeg,
+                headingDegrees = effectiveAzimuth,
                 cardinalDirection = cardinal,
-                pitch = pitchDeg,
-                roll = rollDeg,
+                pitch = effectivePitch,
+                roll = lastRollDeg,
                 estimatedDistanceMeters = estimatedRange,
                 isAvailable = true
             )

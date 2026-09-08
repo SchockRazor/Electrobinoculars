@@ -1,5 +1,8 @@
 package com.electrobinoculars.app.ui
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.Camera
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -22,6 +25,7 @@ import com.electrobinoculars.app.data.ElectrobinocularsUiState
 import com.electrobinoculars.app.data.VisionMode
 import com.electrobinoculars.app.data.ZoomStateData
 import com.electrobinoculars.app.sensor.SensorTelemetryManager
+import com.electrobinoculars.app.ui.controls.DebugControlBar
 import com.electrobinoculars.app.ui.controls.TacticalZoomSlider
 import com.electrobinoculars.app.ui.controls.VisionModeSelector
 import com.electrobinoculars.app.ui.hud.TacticalVisorHud
@@ -36,7 +40,8 @@ import com.electrobinoculars.app.ui.viewfinder.ViewfinderContainer
  *    filtered in real-time by AGSL RuntimeShaders and ColorMatrices.
  * 2. Optical FX Layer: Procedural phosphor grain (NVG) and CRT scanlines (Tactical Mono).
  * 3. Tactical Visor HUD Layer: Pure Imperial Amber vector overlays, telemetry readouts,
- *    and tactile edge controls (unaffected by optical filters).
+ *    and tactile edge controls (unaffected by optical filters). Can be toggled on/off.
+ * 4. Debug Control Bar: Shown at launch when UI is hidden to test zoom, distance, and compass.
  */
 @Composable
 fun MainScreen(
@@ -45,8 +50,14 @@ fun MainScreen(
 ) {
     val context = LocalContext.current
 
-    var uiState by remember { mutableStateOf(ElectrobinocularsUiState()) }
+    var uiState by remember { mutableStateOf(ElectrobinocularsUiState(isUiVisible = false)) }
     var activeCamera by remember { mutableStateOf<Camera?>(null) }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        uiState = uiState.copy(hasCameraPermission = isGranted)
+    }
 
     // 1. Initialize Sensor Telemetry Manager with landscape attitude & rangefinder calculations
     val sensorManager = remember {
@@ -66,6 +77,42 @@ fun MainScreen(
     // Update sensor manager whenever zoom changes to adjust dynamic stadiametric range estimation
     LaunchedEffect(uiState.zoomState.zoomRatio) {
         sensorManager.updateZoomRatio(uiState.zoomState.zoomRatio)
+    }
+
+    fun applyZoomRatio(newRatio: Float) {
+        val cleanRatio = if (newRatio.isNaN() || newRatio < 1.0f) 1.0f else newRatio
+        val clampedRatio = cleanRatio.coerceIn(
+            uiState.zoomState.minZoomRatio,
+            uiState.zoomState.maxZoomRatio
+        )
+        activeCamera?.cameraControl?.setZoomRatio(clampedRatio)
+        val linear = ZoomStateData.calculateLinearZoom(
+            clampedRatio,
+            uiState.zoomState.minZoomRatio,
+            uiState.zoomState.maxZoomRatio
+        )
+        uiState = uiState.copy(
+            zoomState = uiState.zoomState.copy(
+                zoomRatio = clampedRatio,
+                linearZoom = linear
+            )
+        )
+    }
+
+    fun applyLinearZoom(newLinear: Float) {
+        val cleanLinear = if (newLinear.isNaN()) 0.0f else newLinear.coerceIn(0f, 1f)
+        activeCamera?.cameraControl?.setLinearZoom(cleanLinear)
+        val ratio = ZoomStateData.calculateZoomRatio(
+            cleanLinear,
+            uiState.zoomState.minZoomRatio,
+            uiState.zoomState.maxZoomRatio
+        )
+        uiState = uiState.copy(
+            zoomState = uiState.zoomState.copy(
+                linearZoom = cleanLinear,
+                zoomRatio = ratio
+            )
+        )
     }
 
     Box(
@@ -114,11 +161,9 @@ fun MainScreen(
         // ====================================================================
         when (uiState.visionMode) {
             VisionMode.NIGHT_VISION -> {
-                // Procedural high-gain phosphor grain noise
                 GrainOverlay(modifier = Modifier.fillMaxSize())
             }
             VisionMode.TACTICAL_MONO -> {
-                // Procedural CRT scanlines
                 ScanlineOverlay(modifier = Modifier.fillMaxSize())
             }
             else -> {
@@ -127,70 +172,81 @@ fun MainScreen(
         }
 
         // ====================================================================
-        // LAYER 3: TACTICAL HUD OVERLAY (Isolated Imperial Amber Vector Graphics)
+        // LAYER 3: TACTICAL HUD OVERLAY & CONTROLS (Imperial Amber Vector Graphics)
+        // Rendered only when isUiVisible is TRUE
         // ====================================================================
-        TacticalVisorHud(
-            modifier = Modifier.fillMaxSize(),
-            telemetry = uiState.telemetry,
-            zoomState = uiState.zoomState,
-            visionMode = uiState.visionMode,
-            isFallback = uiState.isUsingFallbackTestPattern
-        )
+        if (uiState.isUiVisible) {
+            TacticalVisorHud(
+                modifier = Modifier.fillMaxSize(),
+                telemetry = uiState.telemetry,
+                zoomState = uiState.zoomState,
+                visionMode = uiState.visionMode,
+                isFallback = uiState.isUsingFallbackTestPattern
+            )
 
-        // ====================================================================
-        // CONTROLS: TACTICAL EDGE INTERFACES
-        // ====================================================================
-        // Left Edge: Multi-Spectral Vision Mode Selector
-        VisionModeSelector(
-            modifier = Modifier
-                .align(Alignment.CenterStart)
-                .padding(start = 24.dp),
-            currentMode = uiState.visionMode,
-            onModeSelected = { selectedMode ->
-                uiState = uiState.copy(visionMode = selectedMode)
-            }
-        )
-
-        // Right Edge: Tactical Zoom Thumb Dial & Presets
-        TacticalZoomSlider(
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .padding(end = 24.dp),
-            zoomState = uiState.zoomState,
-            onLinearZoomChanged = { newLinear ->
-                val cleanLinear = if (newLinear.isNaN()) 0.0f else newLinear.coerceIn(0f, 1f)
-                activeCamera?.cameraControl?.setLinearZoom(cleanLinear)
-                if (uiState.isUsingFallbackTestPattern || activeCamera == null) {
-                    val simulatedRatio = ZoomStateData.calculateZoomRatio(
-                        cleanLinear,
-                        uiState.zoomState.minZoomRatio,
-                        uiState.zoomState.maxZoomRatio
-                    )
-                    uiState = uiState.copy(
-                        zoomState = uiState.zoomState.copy(
-                            linearZoom = cleanLinear,
-                            zoomRatio = simulatedRatio
-                        )
-                    )
+            // Left Edge: Multi-Spectral Vision Mode Selector
+            VisionModeSelector(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(start = 24.dp),
+                currentMode = uiState.visionMode,
+                onModeSelected = { selectedMode ->
+                    uiState = uiState.copy(visionMode = selectedMode)
                 }
+            )
+
+            // Right Edge: Tactical Zoom Thumb Dial & Presets
+            TacticalZoomSlider(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 24.dp),
+                zoomState = uiState.zoomState,
+                onLinearZoomChanged = { newLinear ->
+                    applyLinearZoom(newLinear)
+                },
+                onZoomRatioChanged = { newRatio ->
+                    applyZoomRatio(newRatio)
+                }
+            )
+        }
+
+        // ====================================================================
+        // DEBUG CONTROL BAR (Always accessible, default active at launch)
+        // ====================================================================
+        DebugControlBar(
+            modifier = Modifier.align(Alignment.TopCenter),
+            isUiVisible = uiState.isUiVisible,
+            onToggleUiVisibility = {
+                uiState = uiState.copy(isUiVisible = !uiState.isUiVisible)
             },
-            onZoomRatioChanged = { newRatio ->
-                val cleanRatio = if (newRatio.isNaN() || newRatio < 1.0f) 1.0f else newRatio
-                activeCamera?.cameraControl?.setZoomRatio(cleanRatio)
-                if (uiState.isUsingFallbackTestPattern || activeCamera == null) {
-                    val simulatedLinear = ZoomStateData.calculateLinearZoom(
-                        cleanRatio,
-                        uiState.zoomState.minZoomRatio,
-                        uiState.zoomState.maxZoomRatio
-                    )
-                    uiState = uiState.copy(
-                        zoomState = uiState.zoomState.copy(
-                            linearZoom = simulatedLinear,
-                            zoomRatio = cleanRatio
-                        )
-                    )
-                }
-            }
+            zoomState = uiState.zoomState,
+            onZoomStep = { delta ->
+                applyZoomRatio(uiState.zoomState.zoomRatio + delta)
+            },
+            onSetZoomRatio = { ratio ->
+                applyZoomRatio(ratio)
+            },
+            telemetry = uiState.telemetry,
+            onAdjustHeading = { delta ->
+                sensorManager.adjustSimulatedHeading(delta)
+            },
+            onSetHeading = { heading ->
+                sensorManager.setSimulatedHeading(heading)
+            },
+            onAdjustPitch = { delta ->
+                sensorManager.adjustSimulatedPitch(delta)
+            },
+            onSetPitch = { pitch ->
+                sensorManager.setSimulatedPitch(pitch)
+            },
+            onResetSensors = {
+                sensorManager.resetSimulation()
+            },
+            hasCameraPermission = uiState.hasCameraPermission,
+            onRequestCameraPermission = {
+                permissionLauncher.launch(Manifest.permission.CAMERA)
+            },
+            isFallbackActive = uiState.isUsingFallbackTestPattern
         )
     }
 }
