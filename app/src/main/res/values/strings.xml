@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Electrobinoculars</string>
+    <string name="vision_standard">STANDARD</string>
+    <string name="vision_night">NIGHT VISION</string>
+    <string name="vision_thermal">THERMAL IR</string>
+    <string name="vision_tactical">TACTICAL MONO</string>
+    <string name="engage_optical_sensor">ENGAGE OPTICAL SENSOR</string>
+    <string name="sensor_diagnostic_banner">OPTICAL SENSOR OFFLINE // SYNTHETIC DIAGNOSTIC ACTIVE</string>
+    <string name="sensor_diagnostic_sub">CARRIER FREQ: 1420.405 MHz | SYNC: NOMINAL | GRID: ACTIVE</string>
+</resources>
