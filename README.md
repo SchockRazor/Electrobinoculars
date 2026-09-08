@@ -65,10 +65,19 @@ While this initial iteration runs as a native Android app for rapid development 
 
 ---
 
-## 📜 Disclaimer & Legal
+## 📜 Disclaimer & Legal / Haftungsausschluss
 
-> **Electrobinoculars is an unofficial, non-commercial fan project created purely for fun, education, and prop-making exploration.**
-> 
-> * **Star Wars** and all associated names, marks, emblems, designs, and images are registered trademarks and/or copyrights of **Lucasfilm Ltd.**, **The Walt Disney Company**, or their respective affiliates and subsidiaries.
-> * This project is not affiliated with, endorsed by, or sponsored by Lucasfilm Ltd. or Disney.
-> * All registered trademarks, logos, and brand names mentioned remain the property of their respective owners. No copyright or trademark infringement is intended.
+> [!CAUTION]
+> ### ⚠️ USE AT YOUR OWN RISK / NUTZUNG AUF EIGENE GEFAHR
+> **EN:** Downloading, installing (including APK sideloading), and running this software is done entirely at your own risk. The authors and contributors assume **NO LIABILITY** for any damages, hardware malfunctions, battery issues, data loss, or system crashes resulting from the use or installation of this software. The software is provided **"AS IS"** without warranties of any kind. Read the full [DISCLAIMER.md](DISCLAIMER.md) and [LICENSE](LICENSE).
+>
+> **DE:** Das Herunterladen, Installieren (inkl. Sideloading von APKs) und Ausführen dieser Software erfolgt ausdrücklich **auf eigene Gefahr**. Die Autoren und Mitwirkenden übernehmen **keinerlei Haftung für Schäden** an Geräten, Akkus, Datenverlust oder Fehlfunktionen. Die Software wird „wie besehen“ (AS IS) ohne jegliche Gewährleistung bereitgestellt. Details siehe [DISCLAIMER.md](DISCLAIMER.md) und [LICENSE](LICENSE).
+
+### 🌌 Fan Project & Trademark Notice
+* **Electrobinoculars** is an unofficial, non-commercial fan project created purely for fun, cosplay, and prop-making exploration.
+* **Star Wars** and all associated names, marks, emblems, designs, and images are registered trademarks and/or copyrights of **Lucasfilm Ltd.**, **The Walt Disney Company**, or their respective affiliates and subsidiaries.
+* This project is not affiliated with, endorsed by, or sponsored by Lucasfilm Ltd. or Disney.
+* All registered trademarks, logos, and brand names mentioned remain the property of their respective owners. No copyright or trademark infringement is intended.
+
+### 🚫 Non-Critical Sci-Fi Simulation
+All telemetry readouts (dynamic rangefinder distance, compass heading, artificial horizon, and thermal vision modes) are **artistic, uncalibrated sci-fi simulations**. They must **NEVER** be used for actual navigation, real-world distance measurement, driving, emergency orientation, or any safety- or life-critical applications.
