@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.electrobinoculars.app.data.SensorTelemetry
 import com.electrobinoculars.app.data.VisionMode
+import com.electrobinoculars.app.sensor.RangeConfidence
 import com.electrobinoculars.app.data.ZoomStateData
 import com.electrobinoculars.app.ui.theme.AmberAccent
 import com.electrobinoculars.app.ui.theme.AmberDark
@@ -202,9 +203,15 @@ fun TacticalVisorHud(
                                 letterSpacing = 1.5.sp
                             )
                             Spacer(modifier = Modifier.width(6.dp))
+                            val confidenceColor = when (telemetry.rangeConfidence) {
+                                RangeConfidence.HIGH -> AmberAccent
+                                RangeConfidence.MEDIUM -> AmberPrimary
+                                RangeConfidence.LOW -> AmberDark
+                                RangeConfidence.NO_LOCK -> AmberDark.copy(alpha = 0.5f)
+                            }
                             Text(
-                                text = "[LOCK-ON]",
-                                color = AmberAccent,
+                                text = telemetry.rangeConfidence.label,
+                                color = confidenceColor,
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace
@@ -214,7 +221,7 @@ fun TacticalVisorHud(
 
                     HudBadge {
                         Text(
-                            text = "STADIA: 1:1000",
+                            text = "OBS-H: 1.70M",
                             color = AmberPrimary,
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,

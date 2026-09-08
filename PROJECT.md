@@ -112,6 +112,8 @@ data class SensorTelemetry(
     val pitch: Float = 0.0f,
     val roll: Float = 0.0f,
     val estimatedDistanceMeters: Int = 100,
+    val rangeConfidence: RangeConfidence = RangeConfidence.NO_LOCK,
+    val isRangeStable: Boolean = true,
     val isAvailable: Boolean = true
 )
 
@@ -127,29 +129,32 @@ data class ElectrobinocularsUiState(
 
 ### Sensor Telemetry ↔ Rangefinder Math
 ```kotlin
-object RangefinderEngine {
-    fun calculateDistance(pitchDegrees: Float, zoomRatio: Float): Int {
-        val zoom = zoomRatio.coerceAtLeast(1.0f)
-        val zoomFactor = kotlin.math.sqrt(zoom)
-        val rawDistance = when {
-            pitchDegrees < -0.5f -> {
-                val rad = Math.toRadians((-pitchDegrees).toDouble().coerceAtLeast(0.5))
-                (1.7 / kotlin.math.tan(rad)) * zoomFactor
-            }
-            pitchDegrees in -0.5f..0.5f -> {
-                val t = (pitchDegrees + 0.5f)
-                val dLow = (1.7 / kotlin.math.tan(Math.toRadians(0.5))) * zoomFactor
-                val dHigh = 1200.0 * zoomFactor
-                dLow * (1.0 - t) + dHigh * t
-            }
-            else -> {
-                val elevationFactor = 1.0 + (pitchDegrees.toDouble().coerceAtMost(45.0) / 35.0)
-                1200.0 * elevationFactor * zoomFactor
-            }
-        }
-        return rawDistance.toInt().coerceIn(5, 9999)
-    }
+enum class RangeConfidence(val label: String) {
+    HIGH("[LOCK-ON]"),     // pitch > 8°: reliable within ~10%
+    MEDIUM("[TRACKING]"),  // pitch 4°–8°: reasonable within ~25%
+    LOW("[SCANNING]"),     // pitch 2°–4°: approximate only
+    NO_LOCK("[NO LOCK]")   // pitch < 2° or looking up
 }
+
+data class RangeResult(
+    val distanceMeters: Int,
+    val confidence: RangeConfidence
+)
+
+object RangefinderEngine {
+    // Pure trigonometric: D = H / tan(|pitch|)
+    // Zoom does NOT affect distance (zooming doesn't move the target)
+    fun calculateRange(pitchDegrees: Float, observerHeightMeters: Float = 1.70f): RangeResult
+
+    // Quantization: 1m (<50m), 5m (50-200m), 10m (200-500m), 25m (500-1000m), 50m (1-2km), 100m (>2km)
+
+    fun getCardinalDirection(azimuthDegrees: Float): String
+}
+
+// Signal Processing (SensorFilter.kt):
+// - ExponentialMovingAverage: single-pole EMA (α=0.12 for pitch, α=0.15 for roll)
+// - CircularExponentialMovingAverage: 360°-aware EMA for azimuth
+// - DeadZoneFilter: holds last stable value when |pitch| < 1.5° (hysteresis 0.5°)
 ```
 
 ---

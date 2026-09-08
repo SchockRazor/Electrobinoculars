@@ -16,6 +16,9 @@ private const val TAG = "SensorTelemetryManager"
  * Manages device attitude, orientation, and motion sensors for the Electrobinoculars HUD.
  * Remaps sensor coordinates for fixed landscape viewing and provides real-time compass,
  * pitch/roll horizon telemetry, and stadiametric range estimation.
+ *
+ * Applies EMA (Exponential Moving Average) filters and a dead-zone filter to produce
+ * smooth, stable telemetry readings suitable for rangefinder distance computation.
  */
 class SensorTelemetryManager(
     private val context: Context,
@@ -38,7 +41,6 @@ class SensorTelemetryManager(
     private val remappedMatrix = FloatArray(9)
     private val orientationAngles = FloatArray(3)
 
-    private var currentZoomRatio: Float = 1.0f
     private var isListening = false
 
     private var lastAzimuthDeg: Float = 0.0f
@@ -48,18 +50,20 @@ class SensorTelemetryManager(
     private var simulatedAzimuth: Float? = null
     private var simulatedPitch: Float? = null
 
+    // Signal processing filters for smooth, stable readings
+    // Pitch: α=0.12 for extra smoothing since it drives rangefinder math
+    private val pitchFilter = ExponentialMovingAverage(alpha = 0.12f)
+    // Roll: α=0.15 standard smoothing for horizon ladder display
+    private val rollFilter = ExponentialMovingAverage(alpha = 0.15f)
+    // Azimuth: circular EMA to handle 0°/360° wrap correctly
+    private val azimuthFilter = CircularExponentialMovingAverage(alpha = 0.15f)
+    // Dead-zone filter for pitch: suppresses jitter when near-horizontal
+    private val pitchDeadZone = DeadZoneFilter(deadZoneThreshold = 1.5f, hysteresis = 0.5f)
+
     init {
         rotationVectorSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
         accelerometerSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         magnetometerSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
-    }
-
-    /**
-     * Updates the current zoom ratio used for dynamic rangefinder estimation.
-     */
-    fun updateZoomRatio(zoomRatio: Float) {
-        currentZoomRatio = if (zoomRatio.isNaN() || zoomRatio < 1.0f) 1.0f else zoomRatio
-        emitCurrentState()
     }
 
     /**
@@ -229,27 +233,33 @@ class SensorTelemetryManager(
 
         SensorManager.getOrientation(remappedMatrix, orientationAngles)
 
-        // Azimuth (radians -> degrees 0..359)
-        var azimuthDeg = Math.toDegrees(orientationAngles[0].toDouble()).toFloat()
-        if (azimuthDeg.isNaN() || azimuthDeg.isInfinite()) {
-            azimuthDeg = 0.0f
-        } else if (azimuthDeg < 0) {
-            azimuthDeg += 360f
+        // Azimuth (radians -> degrees 0..359), filtered with circular EMA
+        var rawAzimuthDeg = Math.toDegrees(orientationAngles[0].toDouble()).toFloat()
+        if (rawAzimuthDeg.isNaN() || rawAzimuthDeg.isInfinite()) {
+            rawAzimuthDeg = 0.0f
+        } else if (rawAzimuthDeg < 0) {
+            rawAzimuthDeg += 360f
         }
+        val filteredAzimuth = azimuthFilter.update(rawAzimuthDeg)
 
-        var pitchDeg = Math.toDegrees(orientationAngles[1].toDouble()).toFloat()
-        if (pitchDeg.isNaN() || pitchDeg.isInfinite()) {
-            pitchDeg = 0.0f
+        // Pitch (degrees), filtered with EMA then dead-zone
+        var rawPitchDeg = Math.toDegrees(orientationAngles[1].toDouble()).toFloat()
+        if (rawPitchDeg.isNaN() || rawPitchDeg.isInfinite()) {
+            rawPitchDeg = 0.0f
         }
+        val smoothedPitch = pitchFilter.update(rawPitchDeg)
+        val filteredPitch = pitchDeadZone.update(smoothedPitch)
 
-        var rollDeg = Math.toDegrees(orientationAngles[2].toDouble()).toFloat()
-        if (rollDeg.isNaN() || rollDeg.isInfinite()) {
-            rollDeg = 0.0f
+        // Roll (degrees), filtered with EMA
+        var rawRollDeg = Math.toDegrees(orientationAngles[2].toDouble()).toFloat()
+        if (rawRollDeg.isNaN() || rawRollDeg.isInfinite()) {
+            rawRollDeg = 0.0f
         }
+        val filteredRoll = rollFilter.update(rawRollDeg)
 
-        lastAzimuthDeg = azimuthDeg
-        lastPitchDeg = pitchDeg
-        lastRollDeg = rollDeg
+        lastAzimuthDeg = filteredAzimuth
+        lastPitchDeg = filteredPitch
+        lastRollDeg = filteredRoll
 
         emitCurrentState()
     }
@@ -261,7 +271,9 @@ class SensorTelemetryManager(
         val effectiveAzimuth = simulatedAzimuth ?: lastAzimuthDeg
         val effectivePitch = simulatedPitch ?: lastPitchDeg
         val cardinal = RangefinderEngine.getCardinalDirection(effectiveAzimuth)
-        val estimatedRange = RangefinderEngine.calculateEstimatedRangeMeters(effectivePitch, currentZoomRatio)
+
+        // Distance is computed from pitch only — zoom does NOT affect physical distance
+        val rangeResult = RangefinderEngine.calculateRange(effectivePitch)
 
         onTelemetryUpdated(
             SensorTelemetry(
@@ -269,7 +281,9 @@ class SensorTelemetryManager(
                 cardinalDirection = cardinal,
                 pitch = effectivePitch,
                 roll = lastRollDeg,
-                estimatedDistanceMeters = estimatedRange,
+                estimatedDistanceMeters = rangeResult.distanceMeters,
+                rangeConfidence = rangeResult.confidence,
+                isRangeStable = !pitchDeadZone.isInDeadZone,
                 isAvailable = true
             )
         )
