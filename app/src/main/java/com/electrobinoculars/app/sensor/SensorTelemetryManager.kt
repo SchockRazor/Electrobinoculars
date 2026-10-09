@@ -53,8 +53,8 @@ class SensorTelemetryManager(
     // Signal processing filters for smooth, stable readings
     // Pitch: α=0.12 for extra smoothing since it drives rangefinder math
     private val pitchFilter = ExponentialMovingAverage(alpha = 0.12f)
-    // Roll: α=0.15 standard smoothing for horizon ladder display
-    private val rollFilter = ExponentialMovingAverage(alpha = 0.15f)
+    // Roll: circular EMA for the horizon-ladder roll, which can wrap at ±180°
+    private val rollFilter = CircularExponentialMovingAverage(alpha = 0.15f)
     // Azimuth: circular EMA to handle 0°/360° wrap correctly
     private val azimuthFilter = CircularExponentialMovingAverage(alpha = 0.15f)
     // Dead-zone filter for pitch: suppresses jitter when near-horizontal
@@ -242,20 +242,18 @@ class SensorTelemetryManager(
         }
         val filteredAzimuth = azimuthFilter.update(rawAzimuthDeg)
 
-        // Pitch (degrees), filtered with EMA then dead-zone
-        var rawPitchDeg = Math.toDegrees(orientationAngles[1].toDouble()).toFloat()
-        if (rawPitchDeg.isNaN() || rawPitchDeg.isInfinite()) {
-            rawPitchDeg = 0.0f
-        }
-        val smoothedPitch = pitchFilter.update(rawPitchDeg)
+        // Pitch/roll are taken from the camera frame, not from getOrientation(): in the
+        // remapped device frame the Euler "pitch" is ~90° when held upright aiming level,
+        // which collapsed rangefinder distances onto the 2m minimum clamp (v0.0.2 bug).
+        val cameraAttitude = CameraAttitude.fromRotationMatrix(remappedMatrix)
+
+        // Pitch (camera line of sight: 0° level, negative = down), EMA then dead-zone
+        val smoothedPitch = pitchFilter.update(cameraAttitude.pitchDegrees)
         val filteredPitch = pitchDeadZone.update(smoothedPitch)
 
-        // Roll (degrees), filtered with EMA
-        var rawRollDeg = Math.toDegrees(orientationAngles[2].toDouble()).toFloat()
-        if (rawRollDeg.isNaN() || rawRollDeg.isInfinite()) {
-            rawRollDeg = 0.0f
-        }
-        val filteredRoll = rollFilter.update(rawRollDeg)
+        // Roll (about the optical axis), circular EMA normalized back to [-180°, 180°)
+        val filteredRoll = rollFilter.update(cameraAttitude.rollDegrees)
+            .let { if (it > 180f) it - 360f else it }
 
         lastAzimuthDeg = filteredAzimuth
         lastPitchDeg = filteredPitch
