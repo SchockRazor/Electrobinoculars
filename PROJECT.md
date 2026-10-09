@@ -143,6 +143,8 @@ data class RangeResult(
 
 object RangefinderEngine {
     // Pure trigonometric: D = H / tan(|pitch|)
+    // pitch = camera optical-axis depression (0° = level, negative = down), gravity-referenced
+    // via CameraAttitude (getOrientation() device-frame pitch is unusable in landscape).
     // Zoom does NOT affect distance (zooming doesn't move the target)
     fun calculateRange(pitchDegrees: Float, observerHeightMeters: Float = 1.70f): RangeResult
 

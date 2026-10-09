@@ -1,6 +1,8 @@
 package com.electrobinoculars.app.sensor
 
 import kotlin.math.abs
+import kotlin.math.asin
+import kotlin.math.atan2
 import kotlin.math.roundToInt
 import kotlin.math.tan
 
@@ -36,11 +38,67 @@ data class RangeResult(
 )
 
 /**
+ * Camera-frame attitude angles derived from a gravity-referenced rotation matrix.
+ *
+ * @property pitchDegrees Camera optical-axis pitch (elevation) in degrees: 0° = level aiming,
+ * negative = looking down (depression), positive = looking up.
+ * @property rollDegrees Camera roll about the optical axis in degrees: positive = right edge down.
+ */
+data class CameraAngles(
+    val pitchDegrees: Float,
+    val rollDegrees: Float
+)
+
+/**
+ * Extracts camera-referenced attitude from a screen-aligned, world-referenced rotation matrix.
+ *
+ * [android.hardware.SensorManager.getOrientation] returns Euler angles of the device frame:
+ * after a landscape remap its "pitch" reads ~±90° when the phone is held upright aiming at the
+ * horizon, and its "roll" axis points into the ground — neither is usable for camera-frame HUD
+ * geometry. Deriving the angles from the matrix columns instead yields the true optical-axis
+ * attitude:
+ * - The camera looks along the device -Z axis (out of the back of the phone), which the screen
+ *   remap leaves unchanged, so the optical-axis pitch is remap-invariant and gimbal-safe.
+ * - Screen right/up directions are matrix columns 0/1 expressed in world coordinates
+ *   (X = east, Y = north, Z = up), giving the roll of the horizon within the viewfinder.
+ */
+object CameraAttitude {
+
+    /**
+     * Computes camera pitch and roll from a row-major 3x3 rotation matrix (9 floats).
+     *
+     * @param matrix Screen-aligned device-to-world rotation matrix (e.g. the output of
+     * [android.hardware.SensorManager.remapCoordinateSystem]).
+     * @return [CameraAngles] with 0°/0° fallback for degenerate or malformed input.
+     */
+    fun fromRotationMatrix(matrix: FloatArray): CameraAngles {
+        if (matrix.size < 9) return CameraAngles(0.0f, 0.0f)
+        for (i in 0 until 9) {
+            val v = matrix[i]
+            if (v.isNaN() || v.isInfinite()) return CameraAngles(0.0f, 0.0f)
+        }
+
+        // Forward world Z at index 8 (negative third column of the matrix): level = 0,
+        // looking down = negative pitch, matching the rangefinder's depression convention.
+        val forwardZ = -matrix[8].toDouble().coerceIn(-1.0, 1.0)
+        val pitchDeg = Math.toDegrees(asin(forwardZ)).toFloat()
+
+        // Screen right/up world Z components at indices 6/7 (third matrix row); the negative
+        // sign yields the positive = right-edge-down roll convention used by the HUD ladder.
+        val rollDeg = -Math.toDegrees(atan2(matrix[6].toDouble(), matrix[7].toDouble())).toFloat()
+
+        return CameraAngles(pitchDeg, rollDeg)
+    }
+}
+
+/**
  * Tactical Rangefinder Engine.
  *
  * Computes distance estimates using monocular trigonometric ranging:
  * `D = H / tan(|pitch|)`, where H is the observer's eye height above ground
- * and pitch is the downward tilt angle of the device.
+ * and pitch is the depression angle of the camera's optical axis relative to
+ * the horizon (0° = level aiming, negative = looking down) — see [CameraAttitude]
+ * for how that angle is derived from the sensor rotation matrix.
  *
  * This is the same principle used by military mil-dot reticles and stadiametric
  * rangefinders — given a known baseline (observer height) and a measured angle,
@@ -76,7 +134,7 @@ object RangefinderEngine {
      * where:
      * - D = horizontal distance to target
      * - H = observer eye height above ground plane
-     * - pitch = device tilt angle below horizontal (negative = looking down)
+     * - pitch = camera optical-axis depression angle below horizontal (negative = looking down)
      *
      * The result is quantized to avoid false precision:
      * - < 50m: nearest 1m
@@ -86,7 +144,8 @@ object RangefinderEngine {
      * - 1000–2000m: nearest 50m
      * - > 2000m: nearest 100m
      *
-     * @param pitchDegrees Filtered pitch tilt in degrees. Negative = looking down, positive = looking up.
+     * @param pitchDegrees Camera line-of-sight pitch in degrees: 0° = level aiming,
+     * negative = looking down, positive = looking up.
      * @param observerHeightMeters Eye-level height of the observer. Defaults to 1.70m.
      * @return [RangeResult] containing quantized distance and confidence level.
      */

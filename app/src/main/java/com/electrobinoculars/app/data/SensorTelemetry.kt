@@ -7,8 +7,8 @@ import com.electrobinoculars.app.sensor.RangeConfidence
  *
  * @property headingDegrees Azimuth compass angle in degrees [0.0f, 359.9f].
  * @property cardinalDirection 16-point cardinal compass rose designation (e.g. "N", "WSW").
- * @property pitch Device inclination tilt in degrees (negative = looking down, positive = looking up).
- * @property roll Device lateral roll tilt in degrees.
+ * @property pitch Camera line-of-sight pitch in degrees (0° = level aiming, negative = looking down, positive = looking up).
+ * @property roll Camera roll about the optical axis in degrees (positive = right edge down).
  * @property estimatedDistanceMeters Estimated target distance in meters computed by rangefinder engine.
  * @property rangeConfidence Confidence level of the distance estimate based on pitch angle quality.
  * @property isRangeStable True if the pitch dead-zone filter is NOT actively suppressing (stable reading).
