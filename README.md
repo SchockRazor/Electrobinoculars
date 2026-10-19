@@ -5,6 +5,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Android%2013%2B%20(API%2033%2B)-brightgreen.svg)](https://developer.android.com)
 [![Language](https://img.shields.io/badge/Language-Kotlin%202.0-blue.svg)](https://kotlinlang.org)
 [![UI](https://img.shields.io/badge/UI-Jetpack%20Compose-purple.svg)](https://developer.android.com/jetpack/compose)
+[![Version](https://img.shields.io/badge/Version-v0.0.4-gold.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/License-MIT%20%2F%20Fan%20Project-orange.svg)](#disclaimer--legal)
 
 ---
@@ -62,6 +63,14 @@ While this initial iteration runs as a native Android app for rapid development 
    ```bash
    ./gradlew installDebug
    ```
+
+---
+
+## 📋 Release & Changelog
+
+Current Version: **`v0.0.4`** (2026-10-19)
+
+For the detailed version history, feature additions, performance optimizations, and bug fixes across all iterations, see [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
