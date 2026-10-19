@@ -1,10 +1,12 @@
 package com.electrobinoculars.app.ui
 
 import android.Manifest
+import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.Camera
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -13,13 +15,19 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.electrobinoculars.app.data.ElectrobinocularsUiState
 import com.electrobinoculars.app.data.VisionMode
 import com.electrobinoculars.app.data.ZoomStateData
@@ -48,8 +56,23 @@ fun MainScreen(
     forceFallback: Boolean = false
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
 
-    var uiState by remember { mutableStateOf(ElectrobinocularsUiState(isUiVisible = false)) }
+    val initialPermission = remember {
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.CAMERA
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    var uiState by remember {
+        mutableStateOf(
+            ElectrobinocularsUiState(
+                isUiVisible = false,
+                hasCameraPermission = initialPermission
+            )
+        )
+    }
     var activeCamera by remember { mutableStateOf<Camera?>(null) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -65,11 +88,30 @@ fun MainScreen(
         }
     }
 
-    // Lifecycle observer for hardware sensors
-    DisposableEffect(Unit) {
-        sensorManager.startListening()
+    // Lifecycle observer for hardware sensors & permission synchronization
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> {
+                    sensorManager.startListening()
+                    val currentPermission = ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.CAMERA
+                    ) == PackageManager.PERMISSION_GRANTED
+                    if (currentPermission != uiState.hasCameraPermission) {
+                        uiState = uiState.copy(hasCameraPermission = currentPermission)
+                    }
+                }
+                Lifecycle.Event.ON_PAUSE -> {
+                    sensorManager.stopListening()
+                }
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             sensorManager.stopListening()
+            lifecycleOwner.lifecycle.removeObserver(observer)
         }
     }
 
@@ -121,17 +163,34 @@ fun MainScreen(
             VisionShaders.getRenderEffectForMode(uiState.visionMode)
         }
 
+        val currentZoomRatio by rememberUpdatedState(uiState.zoomState.zoomRatio)
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
                     this.renderEffect = renderEffect
                 }
+                .pointerInput(Unit) {
+                    detectTransformGestures { _, _, zoomChange, _ ->
+                        if (zoomChange != 1.0f) {
+                            applyZoomRatio(currentZoomRatio * zoomChange)
+                        }
+                    }
+                }
         ) {
             ViewfinderContainer(
                 modifier = Modifier.fillMaxSize(),
                 zoomRatio = uiState.zoomState.zoomRatio,
                 forceFallback = forceFallback,
+                hasCameraPermission = uiState.hasCameraPermission,
+                externalHasCameraPermission = uiState.hasCameraPermission,
+                onRequestPermission = {
+                    permissionLauncher.launch(Manifest.permission.CAMERA)
+                },
+                onRequestPermissionOverride = {
+                    permissionLauncher.launch(Manifest.permission.CAMERA)
+                },
                 onCameraReady = { camera ->
                     activeCamera = camera
                 },
@@ -205,42 +264,50 @@ fun MainScreen(
         }
 
         // ====================================================================
-        // DEBUG CONTROL BAR (Always accessible, default active at launch)
+        // DEBUG CONTROL BAR (Rendered only when isDebugPanelVisible is true)
         // ====================================================================
-        DebugControlBar(
-            modifier = Modifier.align(Alignment.TopCenter),
-            isUiVisible = uiState.isUiVisible,
-            onToggleUiVisibility = {
-                uiState = uiState.copy(isUiVisible = !uiState.isUiVisible)
-            },
-            zoomState = uiState.zoomState,
-            onZoomStep = { delta ->
-                applyZoomRatio(uiState.zoomState.zoomRatio + delta)
-            },
-            onSetZoomRatio = { ratio ->
-                applyZoomRatio(ratio)
-            },
-            telemetry = uiState.telemetry,
-            onAdjustHeading = { delta ->
-                sensorManager.adjustSimulatedHeading(delta)
-            },
-            onSetHeading = { heading ->
-                sensorManager.setSimulatedHeading(heading)
-            },
-            onAdjustPitch = { delta ->
-                sensorManager.adjustSimulatedPitch(delta)
-            },
-            onSetPitch = { pitch ->
-                sensorManager.setSimulatedPitch(pitch)
-            },
-            onResetSensors = {
-                sensorManager.resetSimulation()
-            },
-            hasCameraPermission = uiState.hasCameraPermission,
-            onRequestCameraPermission = {
-                permissionLauncher.launch(Manifest.permission.CAMERA)
-            },
-            isFallbackActive = uiState.isUsingFallbackTestPattern
-        )
+        if (uiState.isDebugPanelVisible) {
+            DebugControlBar(
+                modifier = if (uiState.isUiVisible) {
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 42.dp)
+                } else {
+                    Modifier.align(Alignment.TopCenter)
+                },
+                isUiVisible = uiState.isUiVisible,
+                onToggleUiVisibility = {
+                    uiState = uiState.copy(isUiVisible = !uiState.isUiVisible)
+                },
+                zoomState = uiState.zoomState,
+                onZoomStep = { delta ->
+                    applyZoomRatio(uiState.zoomState.zoomRatio + delta)
+                },
+                onSetZoomRatio = { ratio ->
+                    applyZoomRatio(ratio)
+                },
+                telemetry = uiState.telemetry,
+                onAdjustHeading = { delta ->
+                    sensorManager.adjustSimulatedHeading(delta)
+                },
+                onSetHeading = { heading ->
+                    sensorManager.setSimulatedHeading(heading)
+                },
+                onAdjustPitch = { delta ->
+                    sensorManager.adjustSimulatedPitch(delta)
+                },
+                onSetPitch = { pitch ->
+                    sensorManager.setSimulatedPitch(pitch)
+                },
+                onResetSensors = {
+                    sensorManager.resetSimulation()
+                },
+                hasCameraPermission = uiState.hasCameraPermission,
+                onRequestCameraPermission = {
+                    permissionLauncher.launch(Manifest.permission.CAMERA)
+                },
+                isFallbackActive = uiState.isUsingFallbackTestPattern
+            )
+        }
     }
 }

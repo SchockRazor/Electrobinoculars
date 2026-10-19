@@ -15,11 +15,13 @@ app/src/main/
 │   ├── data/
 │   │   ├── VisionMode.kt
 │   │   ├── ZoomStateData.kt
-│   │   └── SensorTelemetry.kt
+│   │   ├── SensorTelemetry.kt
+│   │   └── ElectrobinocularsUiState.kt
 │   ├── ui/
 │   │   ├── theme/
 │   │   │   ├── Color.kt
-│   │   │   └── Type.kt
+│   │   │   ├── Theme.kt
+│   │   │   └── Typography.kt
 │   │   ├── viewfinder/
 │   │   │   ├── ViewfinderContainer.kt
 │   │   │   ├── CameraFeedView.kt
@@ -31,22 +33,24 @@ app/src/main/
 │   │   │   └── HorizonLadder.kt
 │   │   ├── controls/
 │   │   │   ├── TacticalZoomSlider.kt
-│   │   │   └── VisionModeSelector.kt
+│   │   │   ├── VisionModeSelector.kt
+│   │   │   └── DebugControlBar.kt
 │   │   ├── shaders/
 │   │   │   ├── VisionShaders.kt
-│   │   │   ├── ThermalShader.kt
 │   │   │   ├── ScanlineOverlay.kt
 │   │   │   └── GrainOverlay.kt
 │   │   └── MainScreen.kt
 │   └── sensor/
 │       ├── SensorTelemetryManager.kt
-│       └── RangefinderEngine.kt
+│       ├── RangefinderEngine.kt
+│       └── SensorFilter.kt
 └── res/
     ├── values/
     │   ├── strings.xml
     │   ├── colors.xml
     │   └── themes.xml
     └── drawable/
+        ├── ic_launcher.xml
         └── ic_launcher_foreground.xml
 ```
 
@@ -70,8 +74,8 @@ To enforce the strict requirement that multi-spectral vision modes filter the ca
 | 7 | Tactical Zoom Slider & Telemetry | Edge-mounted tactile zoom dial/rocker with haptics, CameraControl setLinearZoom binding, live `[ 1.0x ]` magnification readout | M3 | ORIGINAL_REQUEST §R3 |
 | 8 | Multi-Spectral Vision Modes Engine | 4-button tactical strip: Standard, Night Vision (phosphor green + grain), Thermal IR (AGSL Ironbow / false-color), Tactical Monochrome (CRT scanlines) | M4 | ORIGINAL_REQUEST §R4 |
 | 9 | Compass Bearing Telemetry | SensorManager rotation vector / magnetic field listener, 0°–359° heading with 16-point cardinal bearing (e.g. `248° WSW`) | M5 | ORIGINAL_REQUEST §R5 |
-| 10 | Artificial Horizon Pitch/Roll Ladder | Landscape-remapped Euler angles displaying tilt ladder ($6\text{dp/degree}$ translation, $-\text{roll}$ rotation) | M5 | ORIGINAL_REQUEST §R5 |
-| 11 | Dynamic Continuous Rangefinder | Hybrid continuous physics formula calculating target distance ($5\text{m}$–$9,999\text{m}$) based on tilt inclination and optical zoom | M5 | ORIGINAL_REQUEST §R5 |
+| 10 | Artificial Horizon Pitch/Roll Ladder | Landscape-remapped Euler angles displaying tilt ladder ($4\text{dp/degree}$ camera-frame optical-axis pitch translation, $-\text{roll}$ rotation) | M5 | ORIGINAL_REQUEST §R5 |
+| 11 | Dynamic Continuous Rangefinder | Continuous trigonometric formula ($D = H / \tan(|\text{pitch}|)$) based on camera optical-axis depression angle with EMA/dead-zone filtering and dynamic confidence levels (`[LOCK-ON]`, `[TRACKING]`, `[SCANNING]`, `[NO LOCK]`) | M5 | ORIGINAL_REQUEST §R5 |
 | 12 | End-to-End Build & Compilation Verification | Successful build with Gradle (`gradlew.bat assembleDebug`) with 0 errors and debug APK output; Compose/Kotlin clean compilation | M6 | ORIGINAL_REQUEST §Acceptance |
 
 ---
@@ -79,12 +83,12 @@ To enforce the strict requirement that multi-spectral vision modes filter the ca
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| M1 | Android Scaffolding & CameraX with Fallback | Project build scripts, AndroidManifest, CameraX PreviewView, animated synthetic test pattern Canvas, permissions | none | IN_PROGRESS |
-| M2 | Fixed Landscape Tactical Visor HUD | Imperial Amber vector HUD theme, 3-layer viewport, corner brackets, reticle, stadiametric markings | M1 | PLANNED |
-| M3 | Digital Zoom Thumb Slider & Telemetry | Edge-mounted tactical slider, linear zoom mapping, CameraControl binding, dynamic `[ 1.0x ]` telemetry | M1, M2 | PLANNED |
-| M4 | Multi-Spectral Vision Modes Engine | 4-mode selector, ColorMatrix filters, AGSL Ironbow thermal shader, procedural grain & scanlines | M1, M2 | PLANNED |
-| M5 | Real-Time Sensor Telemetry & Rangefinder | SensorManager landscape remapping, compass heading with cardinal bearing, pitch/roll ladder, dynamic rangefinder | M1, M2, M3 | PLANNED |
-| M6 | System Integration & Build Verification | Complete app integration, gradlew assembleDebug build verification, review, adversarial challenge, forensic audit | M1, M2, M3, M4, M5 | PLANNED |
+| M1 | Android Scaffolding & CameraX with Fallback | Project build scripts, AndroidManifest, CameraX PreviewView, animated synthetic test pattern Canvas, permissions | none | COMPLETED |
+| M2 | Fixed Landscape Tactical Visor HUD | Imperial Amber vector HUD theme, 3-layer viewport, corner brackets, reticle, stadiametric markings | M1 | COMPLETED |
+| M3 | Digital Zoom Thumb Slider & Telemetry | Edge-mounted tactical slider, linear zoom mapping, CameraControl binding, dynamic `[ 1.0x ]` telemetry | M1, M2 | COMPLETED |
+| M4 | Multi-Spectral Vision Modes Engine | 4-mode selector, ColorMatrix filters, AGSL Ironbow thermal shader, procedural grain & scanlines | M1, M2 | COMPLETED |
+| M5 | Real-Time Sensor Telemetry & Rangefinder | SensorManager landscape remapping, compass heading with cardinal bearing, pitch/roll ladder, dynamic rangefinder | M1, M2, M3 | COMPLETED |
+| M6 | System Integration & Build Verification | Complete app integration, gradlew assembleDebug build verification, review, adversarial challenge, forensic audit | M1, M2, M3, M4, M5 | COMPLETED |
 
 ---
 
@@ -123,12 +127,28 @@ data class ElectrobinocularsUiState(
     val telemetry: SensorTelemetry = SensorTelemetry(),
     val hasCameraPermission: Boolean = false,
     val isCameraHardwareAvailable: Boolean = true,
-    val isUsingFallbackTestPattern: Boolean = false
+    val isUsingFallbackTestPattern: Boolean = false,
+    val isUiVisible: Boolean = false,
+    val isDebugPanelVisible: Boolean = true
 )
 ```
 
-### Sensor Telemetry ↔ Rangefinder Math
+### Sensor Telemetry, Attitude & Rangefinder Math (`com.electrobinoculars.app.sensor`)
 ```kotlin
+data class CameraAngles(
+    val pitchDegrees: Float,
+    val rollDegrees: Float,
+    val azimuthDegrees: Float
+)
+
+object CameraAttitude {
+    // Converts a 9-element rotation matrix into camera optical-axis Euler angles.
+    // In landscape orientation, standard device-frame pitch from getOrientation() gimbal-locks.
+    // CameraAttitude projects gravity onto the camera's optical axis (-Z axis out the back)
+    // to determine true depression/elevation angle, horizon roll, and azimuth.
+    fun fromRotationMatrix(matrix: FloatArray): CameraAngles
+}
+
 enum class RangeConfidence(val label: String) {
     HIGH("[LOCK-ON]"),     // pitch > 8°: reliable within ~10%
     MEDIUM("[TRACKING]"),  // pitch 4°–8°: reasonable within ~25%

@@ -240,11 +240,64 @@ class RangefinderEngineTest {
         val nanResult = CameraAttitude.fromRotationMatrix(nanMatrix)
         assertEquals(0f, nanResult.pitchDegrees)
         assertEquals(0f, nanResult.rollDegrees)
+        assertEquals(0f, nanResult.azimuthDegrees)
 
         val tooShort = floatArrayOf(1f, 0f, 0f, 0f, 1f)
         val shortResult = CameraAttitude.fromRotationMatrix(tooShort)
         assertEquals(0f, shortResult.pitchDegrees)
         assertEquals(0f, shortResult.rollDegrees)
+        assertEquals(0f, shortResult.azimuthDegrees)
+    }
+
+    @Test
+    fun testCameraAttitudeExtractsAzimuthForCardinals() {
+        // Facing North (0°)
+        val north = CameraAttitude.fromRotationMatrix(uprightLandscapeHeadingMatrix(0f))
+        assertTrue("North azimuth should be ~0°, was ${north.azimuthDegrees}", abs(north.azimuthDegrees) < 0.01f)
+        assertTrue("North pitch should be ~0°, was ${north.pitchDegrees}", abs(north.pitchDegrees) < 0.01f)
+        assertTrue("North roll should be ~0°, was ${north.rollDegrees}", abs(north.rollDegrees) < 0.01f)
+
+        // Facing East (90°)
+        val east = CameraAttitude.fromRotationMatrix(uprightLandscapeHeadingMatrix(90f))
+        assertTrue("East azimuth should be ~90°, was ${east.azimuthDegrees}", abs(east.azimuthDegrees - 90f) < 0.01f)
+        assertTrue("East pitch should be ~0°, was ${east.pitchDegrees}", abs(east.pitchDegrees) < 0.01f)
+        assertTrue("East roll should be ~0°, was ${east.rollDegrees}", abs(east.rollDegrees) < 0.01f)
+
+        // Facing South (180°)
+        val south = CameraAttitude.fromRotationMatrix(uprightLandscapeHeadingMatrix(180f))
+        assertTrue("South azimuth should be ~180°, was ${south.azimuthDegrees}", abs(south.azimuthDegrees - 180f) < 0.01f)
+        assertTrue("South pitch should be ~0°, was ${south.pitchDegrees}", abs(south.pitchDegrees) < 0.01f)
+        assertTrue("South roll should be ~0°, was ${south.rollDegrees}", abs(south.rollDegrees) < 0.01f)
+
+        // Facing West (270°)
+        val west = CameraAttitude.fromRotationMatrix(uprightLandscapeHeadingMatrix(270f))
+        assertTrue("West azimuth should be ~270°, was ${west.azimuthDegrees}", abs(west.azimuthDegrees - 270f) < 0.01f)
+        assertTrue("West pitch should be ~0°, was ${west.pitchDegrees}", abs(west.pitchDegrees) < 0.01f)
+        assertTrue("West roll should be ~0°, was ${west.rollDegrees}", abs(west.rollDegrees) < 0.01f)
+    }
+
+    @Test
+    fun testUprightHorizonCrossingKeepsAzimuthStableWithout180DegreeFlip() {
+        // Regression test for the upright horizon-crossing bug: verify that when facing North (0°)
+        // in upright landscape, tilting from depressionDeg = 15f (looking down -15°), through 0f
+        // (level 0°), to -15f (looking up +15°) keeps azimuthDegrees at ~0° (within 0.01f) and NEVER flips to 180°!
+        val down15 = CameraAttitude.fromRotationMatrix(uprightLandscapeHeadingMatrix(0f, depressionDeg = 15f))
+        assertTrue("Pitch should be -15°, was ${down15.pitchDegrees}", abs(down15.pitchDegrees + 15f) < 0.01f)
+        assertTrue("Azimuth at 15° depression should be ~0°, was ${down15.azimuthDegrees}", abs(down15.azimuthDegrees) < 0.01f)
+
+        val down5 = CameraAttitude.fromRotationMatrix(uprightLandscapeHeadingMatrix(0f, depressionDeg = 5f))
+        assertTrue("Azimuth at 5° depression should be ~0°, was ${down5.azimuthDegrees}", abs(down5.azimuthDegrees) < 0.01f)
+
+        val level = CameraAttitude.fromRotationMatrix(uprightLandscapeHeadingMatrix(0f, depressionDeg = 0f))
+        assertTrue("Pitch should be 0°, was ${level.pitchDegrees}", abs(level.pitchDegrees) < 0.01f)
+        assertTrue("Azimuth at level should be ~0°, was ${level.azimuthDegrees}", abs(level.azimuthDegrees) < 0.01f)
+
+        val up5 = CameraAttitude.fromRotationMatrix(uprightLandscapeHeadingMatrix(0f, depressionDeg = -5f))
+        assertTrue("Azimuth at 5° elevation should be ~0°, was ${up5.azimuthDegrees}", abs(up5.azimuthDegrees) < 0.01f)
+
+        val up15 = CameraAttitude.fromRotationMatrix(uprightLandscapeHeadingMatrix(0f, depressionDeg = -15f))
+        assertTrue("Pitch should be +15°, was ${up15.pitchDegrees}", abs(up15.pitchDegrees - 15f) < 0.01f)
+        assertTrue("Azimuth at 15° elevation should be ~0° (never 180°), was ${up15.azimuthDegrees}", abs(up15.azimuthDegrees) < 0.01f)
     }
 
     /**
@@ -270,6 +323,39 @@ class RangefinderEngineTest {
         val right = floatArrayOf(1f, 0f, 0f)
         val up = floatArrayOf(0f, s, c)
         val back = floatArrayOf(0f, -c, s)
+        return matrixFromColumns(right, up, back)
+    }
+
+    /**
+     * Simulates the phone held upright in landscape facing heading [headingDeg] (0 = North,
+     * 90 = East, 180 = South, 270 = West) with depression [depressionDeg] (positive = looking down).
+     */
+    private fun uprightLandscapeHeadingMatrix(headingDeg: Float, depressionDeg: Float = 0f): FloatArray {
+        val hRad = Math.toRadians(headingDeg.toDouble())
+        val dRad = Math.toRadians(depressionDeg.toDouble())
+        val cosH = cos(hRad).toFloat()
+        val sinH = sin(hRad).toFloat()
+        val cosD = cos(dRad).toFloat()
+        val sinD = sin(dRad).toFloat()
+
+        // Forward vector in world coordinates:
+        // horizontal components directed along heading H, vertical depression along -Z
+        val forwardEast = sinH * cosD
+        val forwardNorth = cosH * cosD
+        val forwardUp = -sinD
+
+        // Device back vector = -forward
+        val back = floatArrayOf(-forwardEast, -forwardNorth, -forwardUp)
+
+        // Device right vector in horizontal plane (perpendicular to heading):
+        val right = floatArrayOf(cosH, -sinH, 0f)
+
+        // Device up vector = back x right (orthonormal right-handed basis):
+        val up = floatArrayOf(
+            back[1] * right[2] - back[2] * right[1],
+            back[2] * right[0] - back[0] * right[2],
+            back[0] * right[1] - back[1] * right[0]
+        )
         return matrixFromColumns(right, up, back)
     }
 

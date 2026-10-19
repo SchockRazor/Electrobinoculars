@@ -18,6 +18,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -44,6 +46,8 @@ fun VisionModeSelector(
     currentMode: VisionMode,
     onModeSelected: (VisionMode) -> Unit
 ) {
+    val haptic = LocalHapticFeedback.current
+
     Box(
         modifier = modifier
             .background(VisorPanelBg, SelectorPanelShape)
@@ -78,7 +82,12 @@ fun VisionModeSelector(
                             border = if (isSelected) ModeButtonSelectedBorder else ModeButtonUnselectedBorder,
                             shape = ModeButtonShape
                         )
-                        .clickable { onModeSelected(mode) },
+                        .clickable {
+                            if (mode != currentMode) {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onModeSelected(mode)
+                            }
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     Column(

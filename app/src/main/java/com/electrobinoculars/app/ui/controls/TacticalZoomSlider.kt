@@ -18,12 +18,19 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Constraints
@@ -35,7 +42,6 @@ import com.electrobinoculars.app.ui.theme.AmberDark
 import com.electrobinoculars.app.ui.theme.AmberPrimary
 import com.electrobinoculars.app.ui.theme.VisorPanelBg
 
-private val ZOOM_PRESETS = floatArrayOf(1.0f, 2.0f, 5.0f, 10.0f)
 private val PanelShape = RoundedCornerShape(8.dp)
 private val PanelBorder = BorderStroke(1.5.dp, AmberPrimary)
 private val PresetShape = RoundedCornerShape(3.dp)
@@ -53,6 +59,36 @@ fun TacticalZoomSlider(
     onLinearZoomChanged: (Float) -> Unit,
     onZoomRatioChanged: (Float) -> Unit
 ) {
+    val haptic = LocalHapticFeedback.current
+
+    val presets = remember(zoomState.minZoomRatio, zoomState.maxZoomRatio) {
+        val min = zoomState.minZoomRatio
+        val max = zoomState.maxZoomRatio
+        if (max <= min) {
+            floatArrayOf(min, min, min, min)
+        } else if (kotlin.math.abs(min - 1.0f) < 0.05f && kotlin.math.abs(max - 8.0f) < 0.05f) {
+            floatArrayOf(1.0f, 2.0f, 4.0f, 8.0f)
+        } else if (kotlin.math.abs(min - 1.0f) < 0.05f && kotlin.math.abs(max - 10.0f) < 0.05f) {
+            floatArrayOf(1.0f, 2.0f, 5.0f, 10.0f)
+        } else if (kotlin.math.abs(min - 1.0f) < 0.05f && kotlin.math.abs(max - 4.0f) < 0.05f) {
+            floatArrayOf(1.0f, 2.0f, 3.0f, 4.0f)
+        } else {
+            val step1 = min + (max - min) * (1f / 3f)
+            val step2 = min + (max - min) * (2f / 3f)
+            val roundStep1 = (kotlin.math.round(step1 * 2f) / 2f).coerceIn(min, max)
+            val roundStep2 = (kotlin.math.round(step2 * 2f) / 2f).coerceIn(roundStep1, max)
+            floatArrayOf(min, roundStep1, roundStep2, max)
+        }
+    }
+
+    var lastHapticBoundary by remember(zoomState.minZoomRatio, zoomState.maxZoomRatio) {
+        mutableStateOf(kotlin.math.floor(zoomState.zoomRatio / 0.5f).toInt())
+    }
+
+    LaunchedEffect(zoomState.zoomRatio) {
+        lastHapticBoundary = kotlin.math.floor(zoomState.zoomRatio / 0.5f).toInt()
+    }
+
     val sliderColors = SliderDefaults.colors(
         thumbColor = AmberAccent,
         activeTrackColor = AmberPrimary,
@@ -99,7 +135,7 @@ fun TacticalZoomSlider(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                ZOOM_PRESETS.forEach { preset ->
+                presets.forEach { preset ->
                     val isNear = kotlin.math.abs(zoomState.zoomRatio - preset) < 0.3f
                     Box(
                         modifier = Modifier
@@ -112,12 +148,18 @@ fun TacticalZoomSlider(
                                 PresetShape
                             )
                             .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 onZoomRatioChanged(preset)
                             }
                             .padding(horizontal = 4.dp, vertical = 2.dp)
                     ) {
+                        val presetText = if (preset % 1.0f == 0.0f) {
+                            "${preset.toInt()}X"
+                        } else {
+                            "${kotlin.math.round(preset * 10f) / 10f}X"
+                        }
                         Text(
-                            text = "${preset.toInt()}X",
+                            text = presetText,
                             color = if (isNear) Color.Black else AmberPrimary,
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
@@ -141,6 +183,16 @@ fun TacticalZoomSlider(
                     value = safeLinear,
                     onValueChange = { newLinear ->
                         val cleanLinear = if (newLinear.isNaN()) 0.0f else newLinear.coerceIn(0f, 1f)
+                        val computedRatio = ZoomStateData.calculateZoomRatio(
+                            cleanLinear,
+                            zoomState.minZoomRatio,
+                            zoomState.maxZoomRatio
+                        )
+                        val currentBoundary = kotlin.math.floor(computedRatio / 0.5f).toInt()
+                        if (currentBoundary != lastHapticBoundary) {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            lastHapticBoundary = currentBoundary
+                        }
                         onLinearZoomChanged(cleanLinear)
                     },
                     modifier = Modifier

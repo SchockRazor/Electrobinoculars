@@ -7,7 +7,6 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.util.Log
 import android.view.Surface
-import android.view.WindowManager
 import com.electrobinoculars.app.data.SensorTelemetry
 
 private const val TAG = "SensorTelemetryManager"
@@ -26,7 +25,6 @@ class SensorTelemetryManager(
 ) : SensorEventListener {
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
-    private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
 
     private var rotationVectorSensor: Sensor? = null
     private var accelerometerSensor: Sensor? = null
@@ -39,7 +37,6 @@ class SensorTelemetryManager(
 
     private val rotationMatrix = FloatArray(9)
     private val remappedMatrix = FloatArray(9)
-    private val orientationAngles = FloatArray(3)
 
     private var isListening = false
 
@@ -49,6 +46,7 @@ class SensorTelemetryManager(
 
     private var simulatedAzimuth: Float? = null
     private var simulatedPitch: Float? = null
+    private var simulatedRoll: Float? = null
 
     // Signal processing filters for smooth, stable readings
     // Pitch: α=0.12 for extra smoothing since it drives rangefinder math
@@ -99,11 +97,32 @@ class SensorTelemetryManager(
     }
 
     /**
+     * Sets a manual simulated roll in degrees [-180, 180].
+     */
+    fun setSimulatedRoll(rollDeg: Float) {
+        simulatedRoll = rollDeg.coerceIn(-180f, 180f)
+        emitCurrentState()
+    }
+
+    /**
+     * Adjusts the simulated roll by a delta angle in degrees.
+     */
+    fun adjustSimulatedRoll(deltaDeg: Float) {
+        val current = simulatedRoll ?: lastRollDeg
+        setSimulatedRoll(current + deltaDeg)
+    }
+
+    /**
      * Resets simulated overrides back to hardware sensor readings.
      */
     fun resetSimulation() {
         simulatedAzimuth = null
         simulatedPitch = null
+        simulatedRoll = null
+        pitchFilter.reset()
+        rollFilter.reset()
+        azimuthFilter.reset()
+        pitchDeadZone.reset()
         emitCurrentState()
     }
 
@@ -187,11 +206,19 @@ class SensorTelemetryManager(
         // No-op for attitude telemetry
     }
 
+    private fun getDisplayRotation(): Int {
+        return try {
+            context.display?.rotation
+        } catch (_: Exception) {
+            null
+        } ?: Surface.ROTATION_90
+    }
+
     private fun computeAndEmitOrientation() {
         // Remap coordinates for Landscape orientation
         // In landscape (standard tablet or phone turned 90 deg counterclockwise),
         // device X is pointing towards user bottom, device Y is pointing right.
-        val displayRotation = windowManager?.defaultDisplay?.rotation ?: Surface.ROTATION_90
+        val displayRotation = getDisplayRotation()
         when (displayRotation) {
             Surface.ROTATION_0 -> {
                 // Portrait
@@ -231,21 +258,11 @@ class SensorTelemetryManager(
             }
         }
 
-        SensorManager.getOrientation(remappedMatrix, orientationAngles)
-
-        // Azimuth (radians -> degrees 0..359), filtered with circular EMA
-        var rawAzimuthDeg = Math.toDegrees(orientationAngles[0].toDouble()).toFloat()
-        if (rawAzimuthDeg.isNaN() || rawAzimuthDeg.isInfinite()) {
-            rawAzimuthDeg = 0.0f
-        } else if (rawAzimuthDeg < 0) {
-            rawAzimuthDeg += 360f
-        }
-        val filteredAzimuth = azimuthFilter.update(rawAzimuthDeg)
-
-        // Pitch/roll are taken from the camera frame, not from getOrientation(): in the
-        // remapped device frame the Euler "pitch" is ~90° when held upright aiming level,
-        // which collapsed rangefinder distances onto the 2m minimum clamp (v0.0.2 bug).
+        // Camera-frame attitude derived directly from rotation matrix columns
         val cameraAttitude = CameraAttitude.fromRotationMatrix(remappedMatrix)
+
+        // Azimuth derived from camera optical axis, filtered with circular EMA
+        val filteredAzimuth = azimuthFilter.update(cameraAttitude.azimuthDegrees)
 
         // Pitch (camera line of sight: 0° level, negative = down), EMA then dead-zone
         val smoothedPitch = pitchFilter.update(cameraAttitude.pitchDegrees)
@@ -268,6 +285,7 @@ class SensorTelemetryManager(
     fun emitCurrentState() {
         val effectiveAzimuth = simulatedAzimuth ?: lastAzimuthDeg
         val effectivePitch = simulatedPitch ?: lastPitchDeg
+        val effectiveRoll = simulatedRoll ?: lastRollDeg
         val cardinal = RangefinderEngine.getCardinalDirection(effectiveAzimuth)
 
         // Distance is computed from pitch only — zoom does NOT affect physical distance
@@ -278,7 +296,7 @@ class SensorTelemetryManager(
                 headingDegrees = effectiveAzimuth,
                 cardinalDirection = cardinal,
                 pitch = effectivePitch,
-                roll = lastRollDeg,
+                roll = effectiveRoll,
                 estimatedDistanceMeters = rangeResult.distanceMeters,
                 rangeConfidence = rangeResult.confidence,
                 isRangeStable = !pitchDeadZone.isInDeadZone,

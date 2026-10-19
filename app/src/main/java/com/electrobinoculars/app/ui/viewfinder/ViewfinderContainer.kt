@@ -46,12 +46,16 @@ fun ViewfinderContainer(
     onZoomStateChanged: (ZoomStateData) -> Unit = {},
     onPermissionStatusChanged: (Boolean) -> Unit = {},
     onCameraHardwareAvailabilityChanged: (Boolean) -> Unit = {},
-    onFallbackActiveChanged: (Boolean) -> Unit = {}
+    onFallbackActiveChanged: (Boolean) -> Unit = {},
+    externalHasCameraPermission: Boolean? = null,
+    hasCameraPermission: Boolean? = null,
+    onRequestPermissionOverride: (() -> Unit)? = null,
+    onRequestPermission: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    var hasCameraPermission by remember {
+    var internalHasCameraPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(
                 context,
@@ -65,8 +69,19 @@ fun ViewfinderContainer(
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
-        hasCameraPermission = isGranted
+        internalHasCameraPermission = isGranted
         onPermissionStatusChanged(isGranted)
+    }
+
+    // Determine effective permission: external state takes priority when supplied
+    val effectivePermission = externalHasCameraPermission ?: hasCameraPermission ?: internalHasCameraPermission
+
+    // Keep internal permission state aligned when external permission updates
+    LaunchedEffect(externalHasCameraPermission, hasCameraPermission) {
+        val external = externalHasCameraPermission ?: hasCameraPermission
+        if (external != null && external != internalHasCameraPermission) {
+            internalHasCameraPermission = external
+        }
     }
 
     // Automatically check permission when resuming (e.g. user returns from App Settings)
@@ -77,8 +92,8 @@ fun ViewfinderContainer(
                     context,
                     Manifest.permission.CAMERA
                 ) == PackageManager.PERMISSION_GRANTED
-                if (currentPermission != hasCameraPermission) {
-                    hasCameraPermission = currentPermission
+                if (currentPermission != internalHasCameraPermission) {
+                    internalHasCameraPermission = currentPermission
                     onPermissionStatusChanged(currentPermission)
                 }
             }
@@ -90,8 +105,8 @@ fun ViewfinderContainer(
     }
 
     // Synchronize permission and hardware state with parent state holders
-    LaunchedEffect(hasCameraPermission) {
-        onPermissionStatusChanged(hasCameraPermission)
+    LaunchedEffect(effectivePermission) {
+        onPermissionStatusChanged(effectivePermission)
     }
 
     LaunchedEffect(cameraHardwareAvailable) {
@@ -99,10 +114,14 @@ fun ViewfinderContainer(
     }
 
     // Determine whether fallback synthetic grid must be shown
-    val shouldShowFallback = forceFallback || !hasCameraPermission || !cameraHardwareAvailable
+    val shouldShowFallback = forceFallback || !effectivePermission || !cameraHardwareAvailable
 
     LaunchedEffect(shouldShowFallback) {
         onFallbackActiveChanged(shouldShowFallback)
+    }
+
+    val requestPermissionAction = onRequestPermissionOverride ?: onRequestPermission ?: {
+        permissionLauncher.launch(Manifest.permission.CAMERA)
     }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -110,10 +129,8 @@ fun ViewfinderContainer(
             SyntheticCalibrationGrid(
                 modifier = Modifier.fillMaxSize(),
                 simulatedZoomRatio = zoomRatio,
-                showEngagePermissionButton = !hasCameraPermission && cameraHardwareAvailable,
-                onRequestPermission = {
-                    permissionLauncher.launch(Manifest.permission.CAMERA)
-                }
+                showEngagePermissionButton = !effectivePermission && cameraHardwareAvailable,
+                onRequestPermission = requestPermissionAction
             )
         } else {
             CameraFeedView(

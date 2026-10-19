@@ -43,10 +43,12 @@ data class RangeResult(
  * @property pitchDegrees Camera optical-axis pitch (elevation) in degrees: 0° = level aiming,
  * negative = looking down (depression), positive = looking up.
  * @property rollDegrees Camera roll about the optical axis in degrees: positive = right edge down.
+ * @property azimuthDegrees Camera optical-axis azimuth in degrees: [0, 360) clockwise from true North.
  */
 data class CameraAngles(
     val pitchDegrees: Float,
-    val rollDegrees: Float
+    val rollDegrees: Float,
+    val azimuthDegrees: Float = 0.0f
 )
 
 /**
@@ -65,17 +67,23 @@ data class CameraAngles(
 object CameraAttitude {
 
     /**
-     * Computes camera pitch and roll from a row-major 3x3 rotation matrix (9 floats).
+     * Computes camera pitch, roll, and azimuth from a row-major 3x3 rotation matrix (9 floats).
+     *
+     * Azimuth is extracted from the camera optical axis (-Z column = [-matrix[2], -matrix[5], -matrix[8]])
+     * rather than [android.hardware.SensorManager.getOrientation]: when the phone is held upright in landscape
+     * (normal binoculars grip), the screen-Up axis (+Y, column 1) points straight up at the sky
+     * (matrix[1] ≈ 0, matrix[4] ≈ 0), causing gimbal lock at 0° pitch and an immediate 180° compass flip
+     * (North -> South) when tilting slightly above the horizon (pitch > 0°).
      *
      * @param matrix Screen-aligned device-to-world rotation matrix (e.g. the output of
      * [android.hardware.SensorManager.remapCoordinateSystem]).
-     * @return [CameraAngles] with 0°/0° fallback for degenerate or malformed input.
+     * @return [CameraAngles] with 0°/0°/0° fallback for degenerate or malformed input.
      */
     fun fromRotationMatrix(matrix: FloatArray): CameraAngles {
-        if (matrix.size < 9) return CameraAngles(0.0f, 0.0f)
+        if (matrix.size < 9) return CameraAngles(0.0f, 0.0f, 0.0f)
         for (i in 0 until 9) {
             val v = matrix[i]
-            if (v.isNaN() || v.isInfinite()) return CameraAngles(0.0f, 0.0f)
+            if (v.isNaN() || v.isInfinite()) return CameraAngles(0.0f, 0.0f, 0.0f)
         }
 
         // Forward world Z at index 8 (negative third column of the matrix): level = 0,
@@ -87,7 +95,23 @@ object CameraAttitude {
         // sign yields the positive = right-edge-down roll convention used by the HUD ladder.
         val rollDeg = -Math.toDegrees(atan2(matrix[6].toDouble(), matrix[7].toDouble())).toFloat()
 
-        return CameraAngles(pitchDeg, rollDeg)
+        // Azimuth extracted from the horizontal projection of the camera's forward -Z vector
+        // (forwardEast = -matrix[2], forwardNorth = -matrix[5]), falling back to screen-Up
+        // (matrix[1], matrix[4]) only at the zenith/nadir singularity.
+        val forwardEast = -matrix[2].toDouble()
+        val forwardNorth = -matrix[5].toDouble()
+        val rawAzimuth = if (forwardEast * forwardEast + forwardNorth * forwardNorth > 1e-8) {
+            Math.toDegrees(atan2(forwardEast, forwardNorth)).toFloat()
+        } else {
+            Math.toDegrees(atan2(matrix[1].toDouble(), matrix[4].toDouble())).toFloat()
+        }
+        val azimuthDeg = if (rawAzimuth.isNaN() || rawAzimuth.isInfinite()) {
+            0.0f
+        } else {
+            ((rawAzimuth % 360f) + 360f) % 360f
+        }
+
+        return CameraAngles(pitchDeg, rollDeg, azimuthDeg)
     }
 }
 

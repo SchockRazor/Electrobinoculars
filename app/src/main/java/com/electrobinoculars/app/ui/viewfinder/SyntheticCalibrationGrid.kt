@@ -24,6 +24,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -129,80 +130,46 @@ fun SyntheticCalibrationGrid(
     val stroke2_5Px = remember { Stroke(width = 2.5f) }
     val scanlineColors = remember { listOf(Color.Transparent, Color(0x2EFFA500)) }
 
-    // Reusable paths to avoid per-frame allocations
-    val gridPath = remember { Path() }
-    val cardinalTicksPath = remember { Path() }
-    val majorTicksPath = remember { Path() }
-    val minorTicksPath = remember { Path() }
-    val crosshairPath = remember { Path() }
-    val milTicksPath = remember { Path() }
-    val spectrumPath = remember { Path() }
-
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(backgroundDark)
     ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val width = size.width
-            val height = size.height
-            val cx = width / 2f
-            val cy = height / 2f
-            val centerOffset = Offset(cx, cy)
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .drawWithCache {
+                    val width = size.width
+                    val height = size.height
+                    val cx = width / 2f
+                    val cy = height / 2f
+                    val centerOffset = Offset(cx, cy)
 
-            // 1. DYNAMICALLY SCALED TACTICAL GRID LAYER (scales with zoom ratio)
-            val safeZoom = if (simulatedZoomRatio.isNaN() || simulatedZoomRatio <= 0f) 1.0f else simulatedZoomRatio
-            withTransform({
-                scale(
-                    scaleX = safeZoom,
-                    scaleY = safeZoom,
-                    pivot = centerOffset
-                )
-            }) {
-                // Coordinate grid lines (Batched into a single Path)
-                val gridStep = 54.dp.toPx()
-                gridPath.reset()
-                var gx = 0f
-                while (gx <= width) {
-                    gridPath.moveTo(gx, 0f)
-                    gridPath.lineTo(gx, height)
-                    gx += gridStep
-                }
-                var gy = 0f
-                while (gy <= height) {
-                    gridPath.moveTo(0f, gy)
-                    gridPath.lineTo(width, gy)
-                    gy += gridStep
-                }
-                drawPath(gridPath, amberFaint, style = stroke1Px)
+                    // 1. Pre-built coordinate grid lines path
+                    val gridStep = 54.dp.toPx()
+                    val gridPath = Path().apply {
+                        var gx = 0f
+                        while (gx <= width) {
+                            moveTo(gx, 0f)
+                            lineTo(gx, height)
+                            gx += gridStep
+                        }
+                        var gy = 0f
+                        while (gy <= height) {
+                            moveTo(0f, gy)
+                            lineTo(width, gy)
+                            gy += gridStep
+                        }
+                    }
 
-                // Range concentric metric circles
-                val radiusStep = 70.dp.toPx()
-                for (rIdx in 1..4) {
-                    drawCircle(
-                        color = amberFaint,
-                        radius = radiusStep * rIdx,
-                        center = centerOffset,
-                        style = stroke1Px
-                    )
-                }
+                    // 2. Pre-computed concentric metric circles step
+                    val radiusStep = 70.dp.toPx()
 
-                // Outer rotating azimuth calibration ring with angle ticks
-                val outerRadius = 150.dp.toPx()
-                withTransform({
-                    rotate(outerRotation, pivot = centerOffset)
-                }) {
-                    drawCircle(
-                        color = amberDark,
-                        radius = outerRadius,
-                        center = centerOffset,
-                        style = stroke1_8Px
-                    )
-
-                    // Pre-build tick paths relative to centerOffset
-                    cardinalTicksPath.reset()
-                    majorTicksPath.reset()
-                    minorTicksPath.reset()
+                    // 3. Pre-built azimuth calibration ring ticks paths
+                    val outerRadius = 150.dp.toPx()
+                    val cardinalTicksPath = Path()
+                    val majorTicksPath = Path()
+                    val minorTicksPath = Path()
 
                     for (i in 0 until 36) {
                         val angle = (i * 10) * (PI / 180f).toFloat()
@@ -236,158 +203,221 @@ fun SyntheticCalibrationGrid(
                         }
                     }
 
-                    drawPath(cardinalTicksPath, amberPrimary, style = stroke2_5Px)
-                    drawPath(majorTicksPath, amberPrimary.copy(alpha = 0.7f), style = stroke1_2Px)
-                    drawPath(minorTicksPath, amberDark, style = stroke1_2Px)
-                }
+                    // 4. Pre-computed inner reticle ring bounds
+                    val innerRadius = 92.dp.toPx()
+                    val arcTopLeft = Offset(cx - innerRadius, cy - innerRadius)
+                    val arcSize = Size(innerRadius * 2, innerRadius * 2)
 
-                // Inner counter-rotating segmented reticle ring
-                val innerRadius = 92.dp.toPx()
-                val arcTopLeft = Offset(cx - innerRadius, cy - innerRadius)
-                val arcSize = Size(innerRadius * 2, innerRadius * 2)
-                withTransform({
-                    rotate(innerRotation, pivot = centerOffset)
-                }) {
-                    val segmentSweep = 50f
-                    val gap = 40f
-                    for (segmentIdx in 0 until 4) {
-                        val startAngle = segmentIdx * (segmentSweep + gap)
-                        drawArc(
+                    // 5. Pre-computed pulsating radar ping circle radii constants
+                    val pulseBaseRadius = 55.dp.toPx()
+                    val pulseDeltaRadius = 30.dp.toPx()
+
+                    // 6. Pre-built central precision crosshair path
+                    val crosshairArm = 44.dp.toPx()
+                    val crosshairGap = 8.dp.toPx()
+                    val crosshairPath = Path().apply {
+                        moveTo(cx - crosshairArm, cy); lineTo(cx - crosshairGap, cy)
+                        moveTo(cx + crosshairGap, cy); lineTo(cx + crosshairArm, cy)
+                        moveTo(cx, cy - crosshairArm); lineTo(cx, cy - crosshairGap)
+                        moveTo(cx, cy + crosshairGap); lineTo(cx, cy + crosshairArm)
+                    }
+
+                    // 7. Pre-computed center diamond target pip
+                    val pipSize = 5.dp.toPx()
+                    val halfSide = pipSize * 0.70710677f
+                    val pipTopLeft = Offset(cx - halfSide, cy - halfSide)
+                    val pipDrawSize = Size(halfSide * 2f, halfSide * 2f)
+
+                    // 8. Pre-built stadiametric mil-hash ticks path
+                    val milStep = 14.dp.toPx()
+                    val milBaseOffset = 10.dp.toPx()
+                    val tickHMajor = 4.dp.toPx()
+                    val tickHMinor = 2.5.dp.toPx()
+                    val milTicksPath = Path().apply {
+                        for (mil in 1..3) {
+                            val currentTickHalf = if (mil % 2 == 0) tickHMajor else tickHMinor
+                            val dist = mil * milStep + milBaseOffset
+                            // Left
+                            moveTo(cx - dist, cy - currentTickHalf)
+                            lineTo(cx - dist, cy + currentTickHalf)
+                            // Right
+                            moveTo(cx + dist, cy - currentTickHalf)
+                            lineTo(cx + dist, cy + currentTickHalf)
+                        }
+                    }
+
+                    // 9. Pre-computed simulated tactical target calibration markers
+                    val targetRadius = 4.dp.toPx()
+                    val targetAlphaOffset = Offset(cx + 130.dp.toPx(), cy - 65.dp.toPx())
+                    val targetAlphaStart = Offset(targetAlphaOffset.x + 6.dp.toPx(), targetAlphaOffset.y)
+                    val targetAlphaEnd = Offset(targetAlphaOffset.x + 28.dp.toPx(), targetAlphaOffset.y)
+
+                    val targetBetaOffset = Offset(cx - 145.dp.toPx(), cy + 70.dp.toPx())
+                    val targetBetaStart = Offset(targetBetaOffset.x - 6.dp.toPx(), targetBetaOffset.y)
+                    val targetBetaEnd = Offset(targetBetaOffset.x - 28.dp.toPx(), targetBetaOffset.y)
+
+                    // 10. Pre-computed procedural laser sweep constants
+                    val fadeHeight = 70.dp.toPx()
+
+                    // 11. Pre-computed spectrum analyzer constants and reusable path
+                    val barCount = 18
+                    val barWidth = 5.dp.toPx()
+                    val barSpacing = 3.dp.toPx()
+                    val startX = 36.dp.toPx()
+                    val baseY = height - 32.dp.toPx()
+                    val maxWaveHeight = 36.dp.toPx()
+                    val minWaveHeight = 4.dp.toPx()
+                    val spectrumPath = Path()
+
+                    onDrawBehind {
+                        // 1. DYNAMICALLY SCALED TACTICAL GRID LAYER (scales with zoom ratio)
+                        val safeZoom = if (simulatedZoomRatio.isNaN() || simulatedZoomRatio <= 0f) 1.0f else simulatedZoomRatio
+                        withTransform({
+                            scale(
+                                scaleX = safeZoom,
+                                scaleY = safeZoom,
+                                pivot = centerOffset
+                            )
+                        }) {
+                            // Coordinate grid lines
+                            drawPath(gridPath, amberFaint, style = stroke1Px)
+
+                            // Range concentric metric circles
+                            for (rIdx in 1..4) {
+                                drawCircle(
+                                    color = amberFaint,
+                                    radius = radiusStep * rIdx,
+                                    center = centerOffset,
+                                    style = stroke1Px
+                                )
+                            }
+
+                            // Outer rotating azimuth calibration ring with angle ticks
+                            withTransform({
+                                rotate(outerRotation, pivot = centerOffset)
+                            }) {
+                                drawCircle(
+                                    color = amberDark,
+                                    radius = outerRadius,
+                                    center = centerOffset,
+                                    style = stroke1_8Px
+                                )
+                                drawPath(cardinalTicksPath, amberPrimary, style = stroke2_5Px)
+                                drawPath(majorTicksPath, amberPrimary.copy(alpha = 0.7f), style = stroke1_2Px)
+                                drawPath(minorTicksPath, amberDark, style = stroke1_2Px)
+                            }
+
+                            // Inner counter-rotating segmented reticle ring
+                            withTransform({
+                                rotate(innerRotation, pivot = centerOffset)
+                            }) {
+                                val segmentSweep = 50f
+                                val gap = 40f
+                                for (segmentIdx in 0 until 4) {
+                                    val startAngle = segmentIdx * (segmentSweep + gap)
+                                    drawArc(
+                                        color = amberPrimary.copy(alpha = 0.85f),
+                                        startAngle = startAngle,
+                                        sweepAngle = segmentSweep,
+                                        useCenter = false,
+                                        topLeft = arcTopLeft,
+                                        size = arcSize,
+                                        style = stroke2_5Px
+                                    )
+                                }
+                            }
+
+                            // Pulsating radar ping circle
+                            val pulseRadius = pulseBaseRadius + (pulseProgress * pulseDeltaRadius)
+                            drawCircle(
+                                color = amberPrimary.copy(alpha = (1.0f - pulseProgress) * 0.45f),
+                                radius = pulseRadius,
+                                center = centerOffset,
+                                style = stroke1_5Px
+                            )
+
+                            // Central precision crosshair with sub-millimeter target brackets (Batched Path)
+                            drawPath(crosshairPath, amberPrimary, style = stroke1_6Px)
+
+                            // Center diamond target pip (Zero-allocation rotated square)
+                            rotate(degrees = 45f, pivot = centerOffset) {
+                                drawRect(
+                                    color = amberBright,
+                                    topLeft = pipTopLeft,
+                                    size = pipDrawSize
+                                )
+                            }
+
+                            // Stadiametric mil-hash ticks along horizontal crosshair (Batched Path)
+                            drawPath(milTicksPath, amberPrimary.copy(alpha = 0.7f), style = stroke1_2Px)
+
+                            // Simulated tactical ground/target calibration markers
+                            drawCircle(
+                                color = amberBright.copy(alpha = 0.75f),
+                                radius = targetRadius,
+                                center = targetAlphaOffset,
+                                style = stroke1_5Px
+                            )
+                            drawLine(
+                                color = amberDark,
+                                start = targetAlphaStart,
+                                end = targetAlphaEnd,
+                                strokeWidth = 1f
+                            )
+
+                            drawCircle(
+                                color = amberBright.copy(alpha = 0.75f),
+                                radius = targetRadius,
+                                center = targetBetaOffset,
+                                style = stroke1_5Px
+                            )
+                            drawLine(
+                                color = amberDark,
+                                start = targetBetaStart,
+                                end = targetBetaEnd,
+                                strokeWidth = 1f
+                            )
+                        }
+
+                        // 2. NON-SCALING PROCEDURAL LASER SWEEP
+                        val scanY = height * scanlineYProgress
+                        drawLine(
                             color = amberPrimary.copy(alpha = 0.85f),
-                            startAngle = startAngle,
-                            sweepAngle = segmentSweep,
-                            useCenter = false,
-                            topLeft = arcTopLeft,
-                            size = arcSize,
-                            style = stroke2_5Px
+                            start = Offset(0f, scanY),
+                            end = Offset(width, scanY),
+                            strokeWidth = 2f
                         )
+                        val gradientStart = max(0f, scanY - fadeHeight)
+                        drawRect(
+                            brush = Brush.verticalGradient(
+                                colors = scanlineColors,
+                                startY = gradientStart,
+                                endY = scanY
+                            ),
+                            topLeft = Offset(0f, gradientStart),
+                            size = Size(width, max(0f, min(scanY, fadeHeight)))
+                        )
+
+                        // 3. NON-SCALING CARRIER FREQUENCY SPECTRUM ANALYZER (Bottom Left)
+                        spectrumPath.reset()
+                        for (i in 0 until barCount) {
+                            // Harmonic sine wave oscillation simulating live sensor telemetry reception
+                            val harmonic = sin((outerRotation * (PI / 180f) * 2.2f) + (i * 0.45f)).toFloat()
+                            val waveHeight = (harmonic * 0.5f + 0.5f) * maxWaveHeight + minWaveHeight
+                            val xBar = startX + i * (barWidth + barSpacing)
+                            spectrumPath.addRect(
+                                androidx.compose.ui.geometry.Rect(
+                                    left = xBar,
+                                    top = baseY - waveHeight,
+                                    right = xBar + barWidth,
+                                    bottom = baseY
+                                )
+                            )
+                        }
+                        drawPath(spectrumPath, amberPrimary.copy(alpha = 0.65f))
                     }
                 }
-
-                // Pulsating radar ping circle
-                val pulseRadius = 55.dp.toPx() + (pulseProgress * 30.dp.toPx())
-                drawCircle(
-                    color = amberPrimary.copy(alpha = (1.0f - pulseProgress) * 0.45f),
-                    radius = pulseRadius,
-                    center = centerOffset,
-                    style = stroke1_5Px
-                )
-
-                // Central precision crosshair with sub-millimeter target brackets (Batched Path)
-                val crosshairArm = 44.dp.toPx()
-                val crosshairGap = 8.dp.toPx()
-                crosshairPath.reset()
-                crosshairPath.moveTo(cx - crosshairArm, cy); crosshairPath.lineTo(cx - crosshairGap, cy)
-                crosshairPath.moveTo(cx + crosshairGap, cy); crosshairPath.lineTo(cx + crosshairArm, cy)
-                crosshairPath.moveTo(cx, cy - crosshairArm); crosshairPath.lineTo(cx, cy - crosshairGap)
-                crosshairPath.moveTo(cx, cy + crosshairGap); crosshairPath.lineTo(cx, cy + crosshairArm)
-                drawPath(crosshairPath, amberPrimary, style = stroke1_6Px)
-
-                // Center diamond target pip (Zero-allocation rotated square)
-                val pipSize = 5.dp.toPx()
-                val halfSide = pipSize * 0.70710677f
-                rotate(degrees = 45f, pivot = centerOffset) {
-                    drawRect(
-                        color = amberBright,
-                        topLeft = Offset(cx - halfSide, cy - halfSide),
-                        size = Size(halfSide * 2f, halfSide * 2f)
-                    )
-                }
-
-                // Stadiametric mil-hash ticks along horizontal crosshair (Batched Path)
-                val milStep = 14.dp.toPx()
-                val milBaseOffset = 10.dp.toPx()
-                val tickHMajor = 4.dp.toPx()
-                val tickHMinor = 2.5.dp.toPx()
-                milTicksPath.reset()
-                for (mil in 1..3) {
-                    val currentTickHalf = if (mil % 2 == 0) tickHMajor else tickHMinor
-                    val dist = mil * milStep + milBaseOffset
-                    // Left
-                    milTicksPath.moveTo(cx - dist, cy - currentTickHalf)
-                    milTicksPath.lineTo(cx - dist, cy + currentTickHalf)
-                    // Right
-                    milTicksPath.moveTo(cx + dist, cy - currentTickHalf)
-                    milTicksPath.lineTo(cx + dist, cy + currentTickHalf)
-                }
-                drawPath(milTicksPath, amberPrimary.copy(alpha = 0.7f), style = stroke1_2Px)
-
-                // Simulated tactical ground/target calibration markers
-                val targetAlphaOffset = Offset(cx + 130.dp.toPx(), cy - 65.dp.toPx())
-                drawCircle(
-                    color = amberBright.copy(alpha = 0.75f),
-                    radius = 4.dp.toPx(),
-                    center = targetAlphaOffset,
-                    style = stroke1_5Px
-                )
-                drawLine(
-                    color = amberDark,
-                    start = Offset(targetAlphaOffset.x + 6.dp.toPx(), targetAlphaOffset.y),
-                    end = Offset(targetAlphaOffset.x + 28.dp.toPx(), targetAlphaOffset.y),
-                    strokeWidth = 1f
-                )
-
-                val targetBetaOffset = Offset(cx - 145.dp.toPx(), cy + 70.dp.toPx())
-                drawCircle(
-                    color = amberBright.copy(alpha = 0.75f),
-                    radius = 4.dp.toPx(),
-                    center = targetBetaOffset,
-                    style = stroke1_5Px
-                )
-                drawLine(
-                    color = amberDark,
-                    start = Offset(targetBetaOffset.x - 6.dp.toPx(), targetBetaOffset.y),
-                    end = Offset(targetBetaOffset.x - 28.dp.toPx(), targetBetaOffset.y),
-                    strokeWidth = 1f
-                )
-            }
-
-            // 2. NON-SCALING PROCEDURAL LASER SWEEP
-            val scanY = height * scanlineYProgress
-            drawLine(
-                color = amberPrimary.copy(alpha = 0.85f),
-                start = Offset(0f, scanY),
-                end = Offset(width, scanY),
-                strokeWidth = 2f
-            )
-            val fadeHeight = 70.dp.toPx()
-            val gradientStart = max(0f, scanY - fadeHeight)
-            drawRect(
-                brush = Brush.verticalGradient(
-                    colors = scanlineColors,
-                    startY = gradientStart,
-                    endY = scanY
-                ),
-                topLeft = Offset(0f, gradientStart),
-                size = Size(width, max(0f, min(scanY, fadeHeight)))
-            )
-
-            // 3. NON-SCALING CARRIER FREQUENCY SPECTRUM ANALYZER (Bottom Left)
-            val barCount = 18
-            val barWidth = 5.dp.toPx()
-            val barSpacing = 3.dp.toPx()
-            val startX = 36.dp.toPx()
-            val baseY = height - 32.dp.toPx()
-            val maxWaveHeight = 36.dp.toPx()
-            val minWaveHeight = 4.dp.toPx()
-
-            spectrumPath.reset()
-            for (i in 0 until barCount) {
-                // Harmonic sine wave oscillation simulating live sensor telemetry reception
-                val harmonic = sin((outerRotation * (PI / 180f) * 2.2f) + (i * 0.45f)).toFloat()
-                val waveHeight = (harmonic * 0.5f + 0.5f) * maxWaveHeight + minWaveHeight
-                val xBar = startX + i * (barWidth + barSpacing)
-                spectrumPath.addRect(
-                    androidx.compose.ui.geometry.Rect(
-                        left = xBar,
-                        top = baseY - waveHeight,
-                        right = xBar + barWidth,
-                        bottom = baseY
-                    )
-                )
-            }
-            drawPath(spectrumPath, amberPrimary.copy(alpha = 0.65f))
-        }
+        ) {}
 
         // Diagnostic tactical telemetry status banners
         Column(

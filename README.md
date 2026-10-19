@@ -36,7 +36,7 @@ While this initial iteration runs as a native Android app for rapid development 
 * **Live Sensor Telemetry:**
   * **Compass Azimuth:** 0°–359° bearing with cardinal direction readouts (e.g., `248° WSW`).
   * **Pitch & Roll Horizon:** Real-time artificial horizon ladder and device tilt indicator.
-  * **Dynamic Continuous Rangefinder:** Continuous tactical distance estimation calculated dynamically from inclination tilt angle and optical zoom factor.
+  * **Dynamic Continuous Rangefinder:** Distance estimation calculated trigonometrically from the camera optical-axis depression angle (`D = H / tan(|pitch|)`) with EMA + dead-zone signal filtering and dynamic lock confidence levels (`[LOCK-ON]`, `[TRACKING]`, `[SCANNING]`, `[NO LOCK]`).
 * **Synthetic Test-Pattern Mode:** Built-in animated sci-fi calibration grid fallback for smooth testing in emulator environments or before camera permissions are granted.
 
 ---

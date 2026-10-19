@@ -1,6 +1,5 @@
 package com.electrobinoculars.app
 
-import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -9,6 +8,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.electrobinoculars.app.ui.MainScreen
+import com.electrobinoculars.app.ui.theme.ElectrobinocularsTheme
 
 /**
  * Main Activity for Electrobinoculars.
@@ -25,10 +25,8 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
         // 2. Allow viewport to extend into camera pinhole / display cutout edges
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            window.attributes.layoutInDisplayCutoutMode =
-                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-        }
+        window.attributes.layoutInDisplayCutoutMode =
+            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
 
         // 3. Immersive sticky system bars (transient swipe to reveal)
         val insetsController = WindowCompat.getInsetsController(window, window.decorView)
@@ -41,7 +39,9 @@ class MainActivity : ComponentActivity() {
 
         // 5. Host Compose UI
         setContent {
-            MainScreen()
+            ElectrobinocularsTheme {
+                MainScreen()
+            }
         }
     }
 }

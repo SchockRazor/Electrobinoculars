@@ -3,7 +3,6 @@ package com.electrobinoculars.app.ui.shaders
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.RenderEffect
 import android.graphics.RuntimeShader
-import android.os.Build
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.asComposeRenderEffect
@@ -47,13 +46,9 @@ object VisionShaders {
     """
 
     private val thermalRuntimeShader: RuntimeShader? by lazy {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            try {
-                RuntimeShader(THERMAL_AGSL)
-            } catch (e: Exception) {
-                null
-            }
-        } else {
+        try {
+            RuntimeShader(THERMAL_AGSL)
+        } catch (e: Exception) {
             null
         }
     }
@@ -92,6 +87,11 @@ object VisionShaders {
     val NightVisionColorMatrix = ColorMatrix(NIGHT_VISION_MATRIX_VALUES)
     val TacticalMonoColorMatrix = ColorMatrix(TACTICAL_MONO_MATRIX_VALUES)
     val ThermalFallbackColorMatrix = ColorMatrix(THERMAL_FALLBACK_MATRIX_VALUES)
+
+    // Cached ColorFilters to avoid per-invocation allocations
+    private val nightVisionColorFilter = ColorFilter.colorMatrix(NightVisionColorMatrix)
+    private val tacticalMonoColorFilter = ColorFilter.colorMatrix(TacticalMonoColorMatrix)
+    private val thermalFallbackColorFilter = ColorFilter.colorMatrix(ThermalFallbackColorMatrix)
 
     // Cached RenderEffects to avoid per-recomposition allocations
     private val nightVisionRenderEffect: androidx.compose.ui.graphics.RenderEffect? by lazy {
@@ -142,11 +142,11 @@ object VisionShaders {
     fun getColorFilterForMode(mode: VisionMode): ColorFilter? {
         return when (mode) {
             VisionMode.STANDARD -> null
-            VisionMode.NIGHT_VISION -> ColorFilter.colorMatrix(NightVisionColorMatrix)
-            VisionMode.TACTICAL_MONO -> ColorFilter.colorMatrix(TacticalMonoColorMatrix)
+            VisionMode.NIGHT_VISION -> nightVisionColorFilter
+            VisionMode.TACTICAL_MONO -> tacticalMonoColorFilter
             VisionMode.THERMAL -> {
                 if (thermalRuntimeShader != null) null
-                else ColorFilter.colorMatrix(ThermalFallbackColorMatrix)
+                else thermalFallbackColorFilter
             }
         }
     }
